@@ -1,0 +1,32 @@
+{
+  "name": "crawl-pool",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "ts-node app.ts",
+    "runts": "ts-node"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/cheerio": "^0.22.18",
+    "@types/colors": "^1.2.1",
+    "@types/dotenv": "^8.2.0",
+    "@types/got": "^9.6.11",
+    "@types/http-proxy-agent": "^2.0.2",
+    "@types/ioredis": "^4.16.2",
+    "@types/typescript": "^2.0.0",
+    "cheerio": "^1.0.0-rc.3",
+    "colors": "^1.4.0",
+    "dotenv": "^8.2.0",
+    "got": "^11.3.0",
+    "http-proxy-agent": "^4.0.1",
+    "https-proxy-agent": "^5.0.0",
+    "ioredis": "^4.17.1",
+    "ts-node": "^8.10.1",
+    "tsconfig-paths": "^3.9.0",
+    "typescript": "^3.9.2"
+  }
+}
