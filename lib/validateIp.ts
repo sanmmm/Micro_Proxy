@@ -1,9 +1,6 @@
-import { URL } from 'url'
 import got, { Response, CancelableRequest } from 'got'
-import axios from 'axios'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { HttpProxyAgent } from 'http-proxy-agent'
-import tunnel from 'tunnel'
 
 import {FuncTimeout} from 'utils'
 
@@ -16,7 +13,7 @@ function getAgent(host: string) {
 
 type UrlResValidator = string | RegExp | ((res: Response) => boolean)
 
-export async function baseValidate(aimUrl: string, host: string, validator?: UrlResValidator) {
+export async function baseValidate(aimUrl: string, host: string, maxRtt: number, validator?: UrlResValidator) {
     let startTime: number
     let request: CancelableRequest<Response<string>>
      const res = await FuncTimeout({
@@ -35,7 +32,7 @@ export async function baseValidate(aimUrl: string, host: string, validator?: Url
          cancel: () => {
              request.cancel('timeout error')
          }
-     }, 4000, 1)
+     }, maxRtt, 1)
     const rtt = Date.now() - startTime
     let passed = !validator
     if (validator instanceof Function) {

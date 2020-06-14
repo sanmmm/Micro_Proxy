@@ -356,7 +356,7 @@ const Store = new StoreModel()
 type GetParams<T> = T extends (...args: infer P) => any ? P : any;
 
 type PipelineInstance = {
-    [key in keyof StoreModel]: (...args: GetParams<StoreModel[key]>) => PipelineInstance
+    [key in keyof Omit<StoreModel, 'HGETALL' | 'ZSCAN' | 'SMEMBERS'>]: (...args: GetParams<StoreModel[key]>) => PipelineInstance
 } & {
     exec: () => Promise<any[]>
 }

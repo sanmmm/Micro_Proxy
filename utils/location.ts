@@ -1,5 +1,5 @@
 import codeToLocationMap from 'config/locationCode'
-import { config } from 'getSettings';
+import { configs } from 'getSettings';
 
 const locationNameToCodeMap = Object.entries(codeToLocationMap).reduce((obj, entry) => {
     const [code, location] = entry
@@ -20,7 +20,7 @@ export function getLocationNameByCode (code: string) {
         return location[0]
     }
     // string
-    return location || config.UNKNOWN_LOCATION_CODE
+    return location || configs.UNKNOWN_LOCATION_CODE
 }
 
 export function parseLocation (str: string) {
@@ -38,7 +38,7 @@ export function parseLocation (str: string) {
         code,
     } : {
         name: '',
-        code: config.UNKNOWN_LOCATION_CODE,
+        code: configs.UNKNOWN_LOCATION_CODE,
     }
 }
 

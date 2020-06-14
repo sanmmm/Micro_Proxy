@@ -15,7 +15,7 @@ export interface BaseIpData {
     httpType: IpDataHttpTypes;
     anonymity: IpDataAnonymities;
     rtt: number; // 毫秒
-} 
+}
 
 export interface FreshIpData extends BaseIpData {
     [extraAttr: string]: any;
@@ -27,7 +27,7 @@ export interface PureIpData extends BaseIpData {
     validateCount: number;
 }
 
-export type FuncSelector = (itemEle: CheerioStatic, types: {IpDataHttpTypes: typeof IpDataHttpTypes, IpDataAnonymities: typeof IpDataAnonymities}) => any
+export type FuncSelector = (itemEle: CheerioStatic, types: { IpDataHttpTypes: typeof IpDataHttpTypes, IpDataAnonymities: typeof IpDataAnonymities }) => any
 
 export type Selector = string | FuncSelector | number
 
@@ -53,6 +53,36 @@ export interface CrawlRule {
     interceptor?: (ipDataArr: FreshIpData[]) => FreshIpData[];
 }
 
-export enum CronTaskTypes {
-    test = 'test'
+export interface CrawlRuleDef extends CrawlRule {
+    usedCount: number;
+}
+
+export enum IpPoolChannelStatus {
+    paused = 1,
+    normal = 2,
+}
+
+export interface IpPoolChannelDef {
+    channelName: string;
+    validateUrl: string;
+    maxRtt: number; // 最大延迟 
+    volume: number; // 容量
+    itemBlockTime: number; // ip屏蔽时间
+    itemLifeTime: number; // ip生存期
+    httpValidateUrl?: string; // 供DEFAULT_CHANNEL 使用
+    status?: IpPoolChannelStatus;
+}
+
+export interface ChannelIpDataDef {
+    host: string;
+
+    rtt: number;
+    usedCount: number;
+    validateCount: number;
+    lastValidateTime: number;
+
+    anonymity: number;
+    httpType: number;
+
+    location: string;
 }

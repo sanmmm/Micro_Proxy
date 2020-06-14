@@ -2,9 +2,11 @@ export function generateRedisKey(key: string) {
     return `crwl-pool-${key}`
 }
 
-type HandlerError = (e: Error, cb: (returnValue) => void) => any;
+type HandlerError = (e: Error, cb: (returnValue) => void, ...funcArgs: any[]) => any;
 
-export function catchError(namespace?: string, handleError?: HandlerError) {
+type GetErrorNameSpace = string | (<T = any>(...args: T[]) => string)
+
+export function catchError(namespace?: GetErrorNameSpace, handleError?: HandlerError) {
     return (target, propertyValue, descriptor: PropertyDescriptor) => {
         const func = descriptor.value.bind(target)
         descriptor.value = async function (...args) {
@@ -12,10 +14,11 @@ export function catchError(namespace?: string, handleError?: HandlerError) {
             try {
                 returnValue = await func(...args)
             } catch (e) {
-                console.error(`${namespace} Error:`, e)
+                const namespaceStr = namespace instanceof Function ? namespace(...args) : namespace
+                console.error(`${namespaceStr} Error:`, e)
                 !!handleError && await handleError(e, (v) => {
                     returnValue = v
-                })
+                }, ...args)
             }
             return returnValue
         } as PropertyDescriptor
@@ -54,6 +57,48 @@ export function FuncTimeout<T = any> (exec: {func: () => T; cancel?: () => any},
         }
     })
 }
+
+export function toJson (obj: any) {
+    let type = typeof obj
+    if (type === 'function') {
+        return {
+            type,
+            isLeafNode: true,
+            value: obj.toString(),
+        }
+    }
+    if (type !== 'object' || Array.isArray(obj)) {
+        return {
+            type,
+            isLeafNode: true,
+            value: obj
+        }
+    }
+    
+    let jsonObj: any = {}
+    Object.keys(obj).forEach(key => {
+        const value = Reflect.get(obj, key)
+        Reflect.set(jsonObj, key, this._toJson(value))
+    })
+    return jsonObj
+}
+
+export function fromJson (jsonObj: any) {
+    if (jsonObj.isLeafNode) {
+        if (jsonObj.type === 'function') {
+            const evalFuncBodyStr = `return ${jsonObj.value}`
+            return new Function(evalFuncBodyStr)()
+        }
+        return jsonObj.value
+    }
+    let originObj: any = {}
+    Object.keys(jsonObj).forEach(key => {
+        const descriptor = Reflect.get(jsonObj, key)
+        Reflect.set(originObj, key, this._fromJson(descriptor))
+    })
+    return originObj
+}
+
 
 type CompareFn<T = any> = (item: T) => number
 
@@ -477,3 +522,25 @@ function testStructure () {
 }
 
 // testStructure()
+
+function testToJsonFromJson () {
+    // @ts-ignore
+    const res = toJson({
+        func: () => console.log(1),
+        object: {
+            a: 1,
+            func2: () => console.log('func 2')
+        },
+        array: [1, 2, 3],
+        number: 1,
+        string: 'string',
+    })
+    const str = JSON.stringify(res)
+    const parsed = JSON.parse(str)
+    // @ts-ignore
+    const origin = fromJson(parsed)
+    let funRes = origin.func()
+    console.log(origin)
+}
+
+// testToJsonFromJson()

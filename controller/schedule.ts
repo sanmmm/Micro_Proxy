@@ -1,13 +1,14 @@
 import { format as UrlFormat } from 'url';
 
-import {getLocationNameByCode, parseLocation} from 'utils/location'
+import { getLocationNameByCode, parseLocation } from 'utils/location'
 import { generateRedisKey, catchError } from 'utils';
-import {config} from 'getSettings'
-import {FreshIpData as WildIpData, IpDataHttpTypes, IpDataAnonymities, CrawlRule} from 'type'
+import { DefaultValueConfigs, configs } from 'getSettings'
+import { FreshIpData as WildIpData, IpDataHttpTypes, IpDataAnonymities, CrawlRule } from 'type'
+import * as cache from './cache'
 import getIpRules from 'config/rules'
-import {baseValidate} from 'lib/validateIp'
+import { baseValidate } from 'lib/validateIp'
 import { crawl } from 'lib/getIp';
-import {IpPoolChannel, ChannelIpDataModel, init as ModelInit, GetIpRule} from './model'
+import { IpPoolChannel, ChannelIpDataModel, init as ModelInit, GetIpRule } from 'models/model'
 
 const globalVars = {
     channelMap: new Map<string, IpPoolChannel>(),
@@ -15,7 +16,18 @@ const globalVars = {
     maxValidateTheradCount: 0,
 }
 
-namespace ValidateTasksManage {
+export namespace ValidateTasksManage {
+    interface ConfigOptions {
+        threadCount: number;
+        getChannelData: (channelName: string) => IpPoolChannel;
+    }
+
+    enum ValidateTasksManageStatus {
+        started = 1,
+        waittingStop,
+        stopped,
+    }
+
     export enum ValidateTypes {
         initialValidate,
         baseValidate,
@@ -31,10 +43,34 @@ namespace ValidateTasksManage {
     }
 
     const vars = {
-        isInited: false,
-        leftTheradCount: 0,
+        // isInited: false,
+        maxThreadCount: 0,
+        usedThreadCount: 0,
+        status: ValidateTasksManageStatus.stopped,
+        getChannel: null as ConfigOptions['getChannelData'],
+        startTime: null as number,
+        // leftTheradCount: 0,
     }
     let TaskDataQueue: ValidateTaskData[] = []
+
+    const UtilFuncs = {
+        useThread: (): number => {
+            if (vars.status !== ValidateTasksManageStatus.started)  {
+                return null
+            }
+            if ((vars.maxThreadCount - vars.usedThreadCount) <= 0) {
+                return null
+            }
+            vars.usedThreadCount ++
+            return Date.now()
+        },
+        unuseThread: (reqUseThreadTime: number) => {
+            if (reqUseThreadTime < vars.startTime) {
+                return 
+            }
+            vars.usedThreadCount --
+        },
+    }
 
     class Controller {
         @catchError('_execBaseValidate', (error, cb) => {
@@ -42,9 +78,9 @@ namespace ValidateTasksManage {
                 error,
             })
         })
-        private static async _execBaseValidate (validateUrl: string, host: string): Promise<{error: Error, rtt: number}> {
+        private static async _execBaseValidate(validateUrl: string, host: string, maxRtt: number): Promise<{ error: Error, rtt: number }> {
             let rtt: number
-            const res = await baseValidate(validateUrl, host)
+            const res = await baseValidate(validateUrl, host,  maxRtt)
             rtt = res.rtt
             return {
                 rtt,
@@ -57,13 +93,8 @@ namespace ValidateTasksManage {
                 error,
             })
         })
-        private static async _execLocationValidate (validateUrl: string, host: string) {
-            let rtt: number
-            const res = await baseValidate(validateUrl, host)
-            rtt = res.rtt
-            return {
-                rtt,
-            }
+        private static async _execLocationValidate(validateUrl: string, host: string) {
+          
         }
 
         @catchError('_execAnonymityValidate', (error, cb) => {
@@ -71,18 +102,13 @@ namespace ValidateTasksManage {
                 error,
             })
         })
-        private static async _execAnonymityValidate (validateUrl: string, host: string) {
-            let rtt: number
-            const res = await baseValidate(validateUrl, host)
-            rtt = res.rtt
-            return {
-                rtt,
-            }
+        private static async _execAnonymityValidate(validateUrl: string, host: string) {
+          
         }
 
         @catchError()
-        static async execValidate (task: ValidateTaskData) {
-            const needExecValidateFunc = (task: ValidateTaskData, validateFuncType: ValidateTypes, ) => {
+        static async execValidate(task: ValidateTaskData) {
+            const needExecValidateFunc = (task: ValidateTaskData, validateFuncType: ValidateTypes,) => {
                 return task.type === ValidateTypes.initialValidate || task.type === validateFuncType
             }
 
@@ -92,20 +118,21 @@ namespace ValidateTasksManage {
 
             console.log(`start validate ${task.channelName}/${task.host}`)
 
-            const channel = globalVars.channelMap.get(task.channelName)
-            const ipDataModelObj = await ChannelIpDataModel.findChannelIpData(task.channelName, task.host) || 
-                new ChannelIpDataModel({host: task.host, channelName: task.channelName})
+            // const channel = globalVars.channelMap.get(task.channelName)
+            const channel = vars.getChannel(task.channelName)
+            const ipDataModelObj = await ChannelIpDataModel.findChannelIpData(task.channelName, task.host) ||
+                new ChannelIpDataModel({ host: task.host, channelName: task.channelName })
             let isIpdateModelChanged = false
             if (needExecValidateFunc(task, ValidateTypes.baseValidate)) {
                 let httpType: number, rtt: number, error: Error
-                const validateRes = await this._execBaseValidate(channel.validateUrl, task.host)
+                const validateRes = await this._execBaseValidate(channel.validateUrl, task.host, channel.maxRtt)
                 error = validateRes.error
 
                 if (!validateRes.error) {
                     rtt = validateRes.rtt
                     httpType = IpDataHttpTypes.https
                 } else if (isInitialValidate(task)) {
-                    const httpValidateRes = await this._execBaseValidate(channel.httpValidateUrl, task.host)
+                    const httpValidateRes = await this._execBaseValidate(channel.httpValidateUrl, task.host, channel.maxRtt)
                     error = httpValidateRes.error
                     if (httpValidateRes.error) {
                         console.log(`${task.host} initial validate error`)
@@ -148,77 +175,122 @@ namespace ValidateTasksManage {
             console.log(`stop validate ${task.channelName}/${task.host}`)
         }
 
-        @catchError('handleValidataTask', e => {
-            vars.leftTheradCount ++
-        })
+        @catchError('handleValidataTask')
         static async handleValidataTask() {
-            if (vars.leftTheradCount <= 0) {
+            // if (vars.leftTheradCount <= 0) {
+            //     return
+            // }
+            // vars.leftTheradCount--
+            const time = UtilFuncs.useThread()
+            if (!time) {
                 return
             }
-            vars.leftTheradCount--
-
-            const task = TaskDataQueue.shift()
-            if (task) {
-               await this.execValidate(task)
+            
+            try {
+                const task = TaskDataQueue.shift()
+                if (task) {
+                    await this.execValidate(task)
+                }
+            } catch (e) {
+                console.error(e)
             }
-            vars.leftTheradCount++
+            UtilFuncs.unuseThread(time)
+      
+            // vars.leftTheradCount++
 
             if (!!TaskDataQueue.length) {
                 this.schedule()
             }
-        }   
+        }
 
         @catchError()
         static async schedule() {
-            const nowLeftThreadCount = vars.leftTheradCount
+            // const nowLeftThreadCount = vars.leftTheradCount
+            // for (let i = 0; i < nowLeftThreadCount; i++) {
+            //     this.handleValidataTask()
+            // }
+            const nowLeftThreadCount = vars.maxThreadCount - vars.usedThreadCount
             for (let i = 0; i < nowLeftThreadCount; i++) {
                 this.handleValidataTask()
             }
         }
     }
 
-    export function pushTaskData (channelName: string, taskDataList: ValidateTaskData[]) {
-        TaskDataQueue = TaskDataQueue.concat(taskDataList)
-        if (vars.isInited) {
+    export function pushTaskData(channelName: string, taskDataList: ValidateTaskData[]) {
+        // if (vars.isInited) {
+            //     Controller.schedule()
+            // }
+        if (vars.status === ValidateTasksManageStatus.started) {
+            TaskDataQueue = TaskDataQueue.concat(taskDataList)
             Controller.schedule()
         }
     }
 
-    export function init (threadCount: number) {
-        if (vars.isInited) {
-            return
+    // function updateConfig(config: ConfigOptions) {
+    //     vars.maxThreadCount = config.threadCount
+    //     setImmediate(() => {
+    //         Controller.schedule()
+    //     })
+    // }
+
+    export function start(configOptions: ConfigOptions) {
+        // if (vars.isInited) {
+        //     return
+        // }
+        // vars.isInited = true
+        // vars.leftTheradCount = threadCount
+        // setImmediate(() => {
+        //     Controller.schedule()
+        // })
+        
+        const isStop = vars.status === ValidateTasksManageStatus.stopped
+        if (!isStop) {
+            throw new Error(`启动失败: ValidateTasksManage 当前状态值为非关闭状态: ${vars.status}`)
         }
-        vars.isInited = true
-        vars.leftTheradCount = threadCount
-        setImmediate(() => {
-            Controller.schedule()
-        })
+
+        vars.maxThreadCount = configOptions.threadCount
+        vars.getChannel = configOptions.getChannelData
+        vars.startTime = Date.now()
+        vars.status = ValidateTasksManageStatus.started
+        vars.usedThreadCount = 0
+    }
+
+    export function stop (clearTaskQueue: false) {
+        if (vars.status !== ValidateTasksManageStatus.started) {
+            throw new Error(`关闭失败: ValidateTasksManage 当前状态值为非启动状态: ${vars.status}`)
+        }
+        
+        vars.status = ValidateTasksManageStatus.stopped
+        if (!clearTaskQueue) {
+            TaskDataQueue = []
+        }
     }
 
 }
 
-namespace ChannelScheduleManage {
+export namespace ChannelScheduleManage {
     const channelTimerMap = new Map<string, NodeJS.Timer>()
     const channelRemoveExpiredBlockIpsTimer = new Map<string, NodeJS.Timer>()
     const channelLastScheduleTime = new Map<string, number>()
 
     class Controllers {
         @catchError()
-        static async removeChannelExpiredBlockIps (channelName: string, blockTime: number) {
-            await ChannelIpDataModel.removeChannelExpiredBlockIps(channelName, blockTime)
+        static async removeChannelExpiredBlockIps(channel: IpPoolChannel) {
+            await ChannelIpDataModel.removeChannelExpiredBlockIps(channel.channelName, channel.itemBlockTime)
         }
 
         @catchError()
-        static async channelValidateTasksSchedule (channelName: string, ipDataValidateInterval: number) {
+        static async channelValidateTasksSchedule(channel: IpPoolChannel) {
+            const {channelName} = channel
             const needToValidateSection = {
-                startTime: channelLastScheduleTime.get(channelName) - ipDataValidateInterval,
-                endTime: Date.now() - ipDataValidateInterval,
+                startTime: channelLastScheduleTime.get(channelName) - channel.itemLifeTime,
+                endTime: Date.now() - channel.itemLifeTime,
             }
 
             const expiredHostList = await ChannelIpDataModel.findBySortableFeildOfRange(channelName, 'lastValidateTime', 0, needToValidateSection.startTime - 1)
             await ChannelIpDataModel.removeChannelIps(channelName, expiredHostList)
             const needValidateHostList = await ChannelIpDataModel.findBySortableFeildOfRange(channelName, 'lastValidateTime', needToValidateSection.startTime, needToValidateSection.endTime)
-            const validateTaskDataList= needValidateHostList.map(host => ({
+            const validateTaskDataList = needValidateHostList.map(host => ({
                 channelName,
                 host,
                 type: ValidateTasksManage.ValidateTypes.baseValidate,
@@ -227,7 +299,7 @@ namespace ChannelScheduleManage {
         }
 
         @catchError()
-        static async crawlIpByRuleList () {
+        static async crawlIpByRuleList() {
             const rules = await GetIpRule.getRulesBySortedUsedCount()
             for (let rule of rules) {
                 const wildIpDataList = await crawl(rule)
@@ -238,7 +310,7 @@ namespace ChannelScheduleManage {
                         port: obj.port,
                     })
                 })
-                const isExistedArr = await ChannelIpDataModel.isIpsExistedInChannel(config.DEFAULT_CHANNEL_NAME, hostArr)
+                const isExistedArr = await ChannelIpDataModel.isIpsExistedInChannel(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, hostArr)
                 const validateTaskDataList: ValidateTasksManage.ValidateTaskData[] = []
                 hostArr.forEach((host, index) => {
                     const isExisted = isExistedArr[index]
@@ -247,41 +319,44 @@ namespace ChannelScheduleManage {
                         validateTaskDataList.push({
                             type: ValidateTasksManage.ValidateTypes.initialValidate,
                             host,
-                            channelName: config.DEFAULT_CHANNEL_NAME,
+                            channelName: DefaultValueConfigs.DEFAULT_CHANNEL_NAME,
                             wildIpData,
                         })
                     }
                 })
-                ValidateTasksManage.pushTaskData(config.DEFAULT_CHANNEL_NAME, validateTaskDataList)
-               
-                rule.usedCount ++
+                ValidateTasksManage.pushTaskData(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, validateTaskDataList)
+
+                rule.usedCount++
                 await rule.save()
             }
         }
-    
+
         @catchError()
-        static startChannelValidateTasksSchedule (channelName: string, loopInterval: number, ipDataValidateInterval: number) {
+        static startChannelValidateTasksSchedule(channel: IpPoolChannel, scheduleLoopInterval: number) {
+            const {channelName} = channel
             const oldTimer = channelTimerMap.get(channelName), oldBlockIpsTrimTimer = channelRemoveExpiredBlockIpsTimer.get(channelName)
             if (oldTimer) {
                 clearInterval(oldTimer)
                 clearInterval(oldBlockIpsTrimTimer)
             }
 
-            const tiemr = setInterval(() => {
-                this.channelValidateTasksSchedule(channelName, ipDataValidateInterval)
-            }, loopInterval)
+            const loopFunc = () => {
+                this.channelValidateTasksSchedule(channel)
+            }
+            const tiemr = setInterval(loopFunc, scheduleLoopInterval)
             const blockIpsTrimTimer = setInterval(() => {
-                this.removeChannelExpiredBlockIps(channelName, 1000 * 60 * 60 * 24 * 1)
-            }, 1000 * 60 * 5)
+                this.removeChannelExpiredBlockIps(channel)
+            }, 1000 * 60 * 3)
             channelTimerMap.set(channelName, tiemr)
             channelRemoveExpiredBlockIpsTimer.set(channelName, blockIpsTrimTimer)
             channelLastScheduleTime.set(channelName, Date.now())
 
+            loopFunc()
             this.crawlIpByRuleList()
         }
 
         @catchError()
-        static stopChannelValidateTasksSchedule (channelName: string) {
+        static stopChannelValidateTasksSchedule(channelName: string) {
             const timer = channelTimerMap.get(channelName), blockIpsTrimTimer = channelRemoveExpiredBlockIpsTimer.get(channelName)
             if (timer) {
                 clearInterval(timer)
@@ -294,29 +369,34 @@ namespace ChannelScheduleManage {
         }
     }
 
-    export const {startChannelValidateTasksSchedule: startChannelSchedule} = Controllers
+    export const { startChannelValidateTasksSchedule: startChannelSchedule, stopChannelValidateTasksSchedule: stopChannelSchedule } = Controllers
 }
 
-
-
-export default async function start (validateThreadCount: number) {
+export default async function start(validateThreadCount: number) {
     await ModelInit()
     globalVars.maxValidateTheradCount = validateThreadCount
     const allChannels: IpPoolChannel[] = await IpPoolChannel.findAllChannel()
     allChannels.forEach(channel => {
         globalVars.channelMap.set(channel.channelName, channel)
     })
-    ValidateTasksManage.init(validateThreadCount)
+    cache.setCache(configs.ALL_CHANNELS_MAP_CACHE_KEY, globalVars.channelMap)
+    ValidateTasksManage.start({
+        threadCount: validateThreadCount,
+        getChannelData: (name) => {
+            const channelMap = cache.getCache<Map<string, IpPoolChannel>>(configs.ALL_CHANNELS_MAP_CACHE_KEY)
+            return channelMap.get(name)
+        }
+    })
     allChannels.forEach(channel => {
-        ChannelScheduleManage.startChannelSchedule(channel.channelName, 1000 * 20 * 1, 1000 * 60 * 20)
+        ChannelScheduleManage.startChannelSchedule(channel, 1000 * 20 * 1)
         // ChannelScheduleManage.startChannelSchedule(channel.channelName, 1000 * 1, 1000 * 60 * 20)
-        
+
     })
 }
-    
 
 
-async function testValidateTaskManage () {
+
+async function testValidateTaskManage() {
     const generateTaskDatas = (arr: number[]) => {
         return arr.map(i => ({
             host: i + '',
@@ -326,7 +406,7 @@ async function testValidateTaskManage () {
     }
     const taskDatas = generateTaskDatas([1, 2, 3, 4, 5])
     ValidateTasksManage.pushTaskData('', taskDatas)
-    ValidateTasksManage.init(3)
+    // ValidateTasksManage.start({ threadCount: 3 })
     await new Promise((resolve) => {
         setTimeout(resolve, taskDatas.length * 100)
     })
@@ -336,7 +416,7 @@ async function testValidateTaskManage () {
 
 // testValidateTaskManage()
 
-async function testValidateTaskManage2 () {
+async function testValidateTaskManage2() {
     const taskDataList = [{
         host: '60.191.11.251:3128',
         // channel: confi
@@ -346,7 +426,7 @@ async function testValidateTaskManage2 () {
 
 // testValidateTaskManage2()
 
-async function insertIpDataModel () {
+async function insertIpDataModel() {
     // http://58.220.95.78:9401
     const o = new ChannelIpDataModel({
         host: '58.220.95.78',
@@ -355,13 +435,13 @@ async function insertIpDataModel () {
     // o.updateFeild('')
 }
 
-async function testInitialValidate () {
+async function testInitialValidate() {
     await ModelInit()
     const allChannels: IpPoolChannel[] = await IpPoolChannel.findAllChannel()
     allChannels.forEach(channel => {
         globalVars.channelMap.set(channel.channelName, channel)
     })
-    let wildIpDataList =  await crawl({
+    let wildIpDataList = await crawl({
         name: 'test',
         itemSelector: '#list > table > tbody > tr',
         pagination: {
@@ -395,7 +475,7 @@ async function testInitialValidate () {
         },
     })
     console.log(wildIpDataList.length)
-    ValidateTasksManage.init(1)
+    // ValidateTasksManage.start({ threadCount: 1 })
     wildIpDataList = [{
         ip: '58.220.95.78',
         port: 9401,
@@ -404,7 +484,7 @@ async function testInitialValidate () {
         anonymity: IpDataAnonymities.high,
         rtt: 302,
     }]
-    await ValidateTasksManage.pushTaskData(config.DEFAULT_CHANNEL_NAME, wildIpDataList.slice(0, 2).map(obj => {
+    await ValidateTasksManage.pushTaskData(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, wildIpDataList.slice(0, 2).map(obj => {
         const host = UrlFormat({
             protocol: 'http',
             hostname: obj.ip,
@@ -413,7 +493,7 @@ async function testInitialValidate () {
         return {
             type: ValidateTasksManage.ValidateTypes.initialValidate,
             host,
-            channelName: config.DEFAULT_CHANNEL_NAME,
+            channelName: DefaultValueConfigs.DEFAULT_CHANNEL_NAME,
             wildIpData: obj
         }
     }))
@@ -421,14 +501,14 @@ async function testInitialValidate () {
 
 // testInitialValidate()
 
-async function testValiate () {
+async function testValiate() {
     await start(1)
 }
 
 // testValiate()
 
-async function testUrl () {
-     console.log(UrlFormat({
+async function testUrl() {
+    console.log(UrlFormat({
         hostname: '58.220.95.78',
         port: 9401,
         protocol: 'http',
@@ -437,7 +517,7 @@ async function testUrl () {
 
 // testUrl()
 
-async function testSaveRule () {
+async function testSaveRule() {
     await Promise.all(getIpRules.map(obj => new GetIpRule(obj)).map(o => o.save()))
     let rules = await GetIpRule.getRulesBySortedUsedCount()
     console.log(rules)
@@ -445,11 +525,11 @@ async function testSaveRule () {
 
 // testSaveRule()
 
-async function testSaveRule2 () {
+async function testSaveRule2() {
     const obj = new GetIpRule(getIpRules[0])
     console.log(Object.keys(obj.itemInfoSelectors), Object.values(obj.itemInfoSelectors).map(i => typeof i))
 }
 
 // testSaveRule2()
 
-start(10)
+// start(1)

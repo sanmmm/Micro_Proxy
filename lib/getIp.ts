@@ -26,7 +26,7 @@ export async function crawl (rule: CrawlRule) {
                 freshIpDataArr = rule.interceptor(freshIpDataArr)
             }
             parsedItems = parsedItems.concat(freshIpDataArr)
-            console.log(parsedItems.length)
+            console.log(`rule: [${rule.name}]/ pn: ${i}/ ipCount: ${parsedItems.length}`)
         } catch (e) {
             console.log(colors.red(`[${rule.name}]:请求${reqUrl}失败`))
             console.error(e.message)
@@ -51,8 +51,13 @@ namespace ParseHtml {
         getPriority (tagName: string) {
             return tagPriorityObj[tagName] || tagPriorityObj.other
         },
+        extractIpdataFeildValueByDefault<T extends keyof BaseIpData> (feildName: T, htmlText: string) {
+            const extractor = IpDataFeildValueAutoExtractor[feildName]
+            htmlText = htmlText.trim()
+            return extractor(htmlText) as BaseIpData[T]
+        },
         resolveIpDataFeildValue (feildName: string, value: any) {
-            const ValueTransformer = IpDataFeildTransformer[feildName] 
+            const ValueTransformer = IpDataFeildValueTypeTransformer[feildName] 
             if (!ValueTransformer) {
                 return value
             }
@@ -69,7 +74,7 @@ namespace ParseHtml {
         }
     }
 
-    const IpDataFeildTransformer: {
+    const IpDataFeildValueTypeTransformer: {
         [key in keyof BaseIpData]: any;
     } = {
         ip: String,
@@ -79,6 +84,42 @@ namespace ParseHtml {
         httpType: UtilFuns.getEnumTypeTransformer(IpDataHttpTypes),
         rtt: Number,
     } 
+    const IpDataFeildValueAutoExtractor: {
+        [key in keyof BaseIpData]: (eleInnerText: string) => BaseIpData[key];
+    } = {
+        ip: (text) => {
+            return text
+        },
+        port: (text) => {
+            return Number(text)
+        },
+        rtt: (text) => {
+            let timeUnit = 1
+            if (text.includes('秒')) {
+                timeUnit = 1000
+            }
+            const matched = /[0-9]+/.exec(text)
+            const number = Number(matched && matched[0])
+            return number * timeUnit
+        },
+        location: (text) => text,
+        httpType: (text) => {
+            text = text.toLowerCase()
+            if (text.includes('https')) {
+                return IpDataHttpTypes.https
+            }
+            if (text.includes('http')) {
+                return IpDataHttpTypes.http
+            }
+            return null
+        },
+        anonymity: (text) => {
+            if (text.includes('高匿')) {
+                return IpDataAnonymities.high
+            }
+            return IpDataAnonymities.no
+        },
+    }
     const ipDataFeildCount = 5
     const tagPriorityObj = {
         'td': 0,
@@ -139,7 +180,9 @@ namespace ParseHtml {
                     if (selector instanceof Function) {
                         ipDataObj[feildName] = UtilFuns.resolveIpDataFeildValue(feildName, (selector as FuncSelector)($ele, {IpDataHttpTypes: IpDataHttpTypes, IpDataAnonymities: IpDataAnonymities}))
                     } else if (typeof selector === 'string') {
-                        ipDataObj[feildName] = UtilFuns.resolveIpDataFeildValue(feildName, ($ele(selector)).text())
+                        const selectedText = ($ele(selector)).text()
+                        const extractedValue = UtilFuns.extractIpdataFeildValueByDefault(feildName as keyof BaseIpData, selectedText)
+                        ipDataObj[feildName] = UtilFuns.resolveIpDataFeildValue(feildName, extractedValue)
                     } else if (typeof selector === 'number') {
                         indexToFeildNameMap.set(selector, feildName)
                     } else {
@@ -154,7 +197,9 @@ namespace ParseHtml {
                     analysis.eleArr.forEach((ele, index) => {
                         if (indexToFeildNameMap.has(index)) {
                             const feildName = indexToFeildNameMap.get(index)
-                            ipDataObj[feildName] = UtilFuns.resolveIpDataFeildValue(feildName, $html(ele).text())
+                            const eleText = $html(ele).text()
+                            const extractedValue = UtilFuns.extractIpdataFeildValueByDefault(feildName as keyof BaseIpData, eleText)
+                            ipDataObj[feildName] = UtilFuns.resolveIpDataFeildValue(feildName, extractedValue)
                             indexToFeildNameMap.delete(index)
                         }
                     })
@@ -173,39 +218,42 @@ namespace ParseHtml {
 
 
 // crawl({
-//     name: 'test',
+//     name: '西刺免费代理-国内高匿代理',
 //     itemSelector: '#ip_list > tbody > tr',
 //     pagination: {
-//         formatUrl: (pn) => `https://www.xicidaili.com/wn/${pn}`,
-//         maxPn: 3,
+//         formatUrl: (pn) => `https://www.xicidaili.com/nn/${pn}`,
+//         maxPn: 1,
 //     },
 //     itemStartIndex: 2,
 //     itemInfoSelectors: {
 //         ip: 1,
 //         port: 2,
-//         location: 3,
-//         anonymity: (ele) => {
-//             if (ele.root().text().includes('高匿')) {
-//                 return IpDataAnonymities.high
-//             }
-//             return IpDataAnonymities.no
-//         },
+//         location: () => '中国',
 //         rtt: () => -1,
-//         type: (ele) => {
-//             const text = ele.root().text().toLowerCase()
-//             if (text.includes('https')) {
-//                 return IpDataTypes.https
-//             }
-//             if (text.includes('http')) {
-//                 return IpDataTypes.http
-//             }
-//             return null
-//         }
+//         anonymity: 4,
+//         httpType: 5,
+//         // anonymity: (ele, { IpDataAnonymities }) => {
+//         //     if (ele.root().text().includes('高匿')) {
+//         //         return IpDataAnonymities.high
+//         //     }
+//         //     return IpDataAnonymities.no
+//         // },
+//         // httpType: (ele, { IpDataHttpTypes }) => {
+//         //     const text = ele.root().text().toLowerCase()
+//         //     if (text.includes('https')) {
+//         //         return IpDataHttpTypes.https
+//         //     }
+//         //     if (text.includes('http')) {
+//         //         return IpDataHttpTypes.http
+//         //     }
+//         //     return null
+//         // }
 //     },
 // })
 
+
 // crawl({
-//     name: 'test',
+//     name: '快代理',
 //     itemSelector: '#list > table > tbody > tr',
 //     pagination: {
 //         formatUrl: (pn) => `https://www.kuaidaili.com/free/inha/${pn}/`,
@@ -215,25 +263,9 @@ namespace ParseHtml {
 //     itemInfoSelectors: {
 //         ip: 0,
 //         port: 1,
-//         location: 4,
-//         anonymity: (ele) => {
-//             if (ele.root().text().includes('高匿')) {
-//                 return IpDataAnonymities.high
-//             }
-//             return IpDataAnonymities.no
-//         },
-//         rtt: (ele) => {
-//             return ele('td:nth-child(6)').text().trim().replace('秒', '')
-//         },
-//         httpType: (ele) => {
-//             const text = ele.root().text().toLowerCase()
-//             if (text.includes('https')) {
-//                 return IpDataHttpTypes.https
-//             }
-//             if (text.includes('http')) {
-//                 return IpDataHttpTypes.http
-//             }
-//             return null
-//         }
+//         location: () => '中国',
+//         rtt: 'td:nth-child(6)',
+//         anonymity: 2,
+//         httpType: 3,
 //     },
 // })

@@ -1,6 +1,5 @@
 .history
 .vscode
-.git
 **/node_modules/
 .env
 test

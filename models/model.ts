@@ -1,23 +1,19 @@
 import { URL, format as UrlFormat } from 'url'
 
 import * as store from 'lib/store'
-import {IpDataAnonymities, IpDataHttpTypes, CrawlRule, Selector, FreshIpData} from 'type'
-import { generateRedisKey } from 'utils';
-import settings, { config } from 'getSettings'
-
-interface ChannelOptions {
-    channelName: string;
-    validateUrl: string;
-    httpValidateUrl?: string; // 供DEFAULT_CHANNEL 使用
-}
+import {IpDataAnonymities, IpDataHttpTypes, CrawlRuleDef, Selector, FreshIpData, IpPoolChannelStatus, IpPoolChannelDef, ChannelIpDataDef} from 'type'
+import { generateRedisKey, fromJson, toJson} from 'utils';
+import settings, { DefaultValueConfigs, configs } from 'getSettings'
 
 const CHANNEL_NAMES_SET_KEY = 'CHANNEL_NAME_SET'
 
-export class IpPoolChannel implements ChannelOptions {
-    static getChannelInfoKey(channelName: string) {
-        return generateRedisKey(`${channelName}-data`)
-    }
 
+export class IpPoolChannel implements IpPoolChannelDef {
+    static getChannelInfoKey(channelName: string) {
+        return generateRedisKey(`channel-data-${channelName}`)
+    }
+    static async findAllChannel(onlyName: true): Promise<string[]>
+    static async findAllChannel(onlyName?: false): Promise<IpPoolChannel[]>
     static async findAllChannel(onlyName = false) {
         const allChannelNames = await store.Store.SMEMBERS(CHANNEL_NAMES_SET_KEY)
         if (onlyName) {
@@ -28,33 +24,48 @@ export class IpPoolChannel implements ChannelOptions {
             pipeline.GET(this.getChannelInfoKey(name))
         })
         const channelObjs: any[] = await pipeline.exec()
-        return channelObjs.map(obj => new this(obj))
+        return channelObjs.map(obj => new this(obj, false))
     }
 
     static async findChannel(channelName: string) {
         const channelInfo = await store.Store.GET(this.getChannelInfoKey(channelName))
-        return channelInfo && new this(channelInfo)
+        return channelInfo && new this(channelInfo, false)
     }
 
     channelName: string;
     validateUrl: string;
     httpValidateUrl?: string;
+    status: IpPoolChannelStatus = IpPoolChannelStatus.normal;
+    volume: number = DefaultValueConfigs.DEFAULT_CHANNEL_VOLUME;
+    maxRtt: number = DefaultValueConfigs.DEFAULT_CHANNEL_MAXRTT;
+    itemLifeTime: number = DefaultValueConfigs.DEFAULT_CHANNEL_ITEM_LIFETIME;
+    itemBlockTime: number = DefaultValueConfigs.DEAFULT_CHANNEL_ITEM_BLOCK_TIME;
 
-    get isDefaultChannel () {
-        return this.channelName === config.DEFAULT_CHANNEL_NAME
+    get isPaused () {
+        return this.status === IpPoolChannelStatus.paused
     }
 
-    constructor(options: ChannelOptions) {
+    get isDefaultChannel () {
+        return this.channelName === DefaultValueConfigs.DEFAULT_CHANNEL_NAME
+    }
+
+    constructor(options: Partial<IpPoolChannelDef> & Pick<IpPoolChannelDef, 'channelName'>, isInital = true) {
         Object.assign(this, options)
     }
 
     private _getStorageData() {
-        const { channelName, validateUrl, httpValidateUrl } = this
-        return {
+        const { channelName, validateUrl, httpValidateUrl, status, itemBlockTime, itemLifeTime, volume, maxRtt} = this
+        const data: IpPoolChannelDef = {
             channelName,
             validateUrl,
             httpValidateUrl,
+            status,
+            itemBlockTime,
+            itemLifeTime,
+            volume,
+            maxRtt,
         }
+        return data
     }
 
     async save() {
@@ -66,24 +77,13 @@ export class IpPoolChannel implements ChannelOptions {
         await store.Store.SREM(CHANNEL_NAMES_SET_KEY, this.channelName)
         await store.Store.DEL(IpPoolChannel.getChannelInfoKey(this.channelName))
         await ChannelIpDataModel.removeChannelAllIps(this.channelName)
+        await ChannelIpDataModel.removeAllChannelBlockIps(this.channelName)
     }
 
 }
 
 
-interface ChannelIpData {
-    rtt: number;
-    usedCount: number;
-    validateCount: number;
-    lastValidateTime: number;
-
-    anonymity: number;
-    httpType: number;
-
-    location: string;
-}
-
-interface ChannelIpDataInitOptions extends Partial<ChannelIpData>{
+interface ChannelIpDataInitOptions extends Partial<ChannelIpDataDef>{
     host?: string;
     ip?: string;
     port?: number;
@@ -94,13 +94,13 @@ type SortableFeildName = keyof Pick<ChannelIpDataModel, 'usedCount' | 'validateC
 
 const sortabledFeilds: SortableFeildName[] = ['rtt', 'usedCount', 'validateCount', 'lastValidateTime', 'anonymity', 'httpType']
 
-export class ChannelIpDataModel implements ChannelIpData {
+export class ChannelIpDataModel implements ChannelIpDataDef {
     private static getChannelIpDataMapKey(channelName) {
         return generateRedisKey(`${channelName}-ipdata`)
     }
 
     private static getChannelSortableFeildSetKey(channelName: string, feildName: SortableFeildName) {
-        return generateRedisKey(`${channelName}-${feildName}`)
+        return generateRedisKey(`${channelName}-ipdata-${feildName}`)
     }
     
     private static getChannelBlockedIpSetKey (channelName: string) {
@@ -153,7 +153,7 @@ export class ChannelIpDataModel implements ChannelIpData {
     }
 
     private static removeChannelIpsRecord (channelName: string, hosts: string[], pipeline: store.PipelineInstance) {
-        const isDefaultChannel = channelName === config.DEFAULT_CHANNEL_NAME
+        const isDefaultChannel = channelName === DefaultValueConfigs.DEFAULT_CHANNEL_NAME
         hosts.forEach(host => {
             sortabledFeilds.forEach((feildName) => {
                 pipeline.ZREM(ChannelIpDataModel.getChannelSortableFeildSetKey(channelName, feildName), host)
@@ -167,7 +167,7 @@ export class ChannelIpDataModel implements ChannelIpData {
     }
 
     static async removeChannelAllIps(channelName: string) {
-        const isDefaultChannel = channelName === config.DEFAULT_CHANNEL_NAME
+        const isDefaultChannel = channelName === DefaultValueConfigs.DEFAULT_CHANNEL_NAME
         const allChannelHosts = (await store.Store.HGETALL(this.getChannelIpDataMapKey(channelName))).map(o => o.key)
 
         const pipeline = store.pipeline()
@@ -198,7 +198,7 @@ export class ChannelIpDataModel implements ChannelIpData {
 
     static async removeChannelIps(channelName: string, hosts: string[]) {
         const pipeline = store.pipeline()
-        const isDefaultChannel = channelName === config.DEFAULT_CHANNEL_NAME
+        const isDefaultChannel = channelName === DefaultValueConfigs.DEFAULT_CHANNEL_NAME
 
         this.removeChannelIpsRecord(channelName, hosts, pipeline)
 
@@ -237,6 +237,10 @@ export class ChannelIpDataModel implements ChannelIpData {
         await store.Store.ZREMOVEBYSCORE(this.getChannelBlockedIpSetKey(channelName), 0, Date.now() - blockDurationTime)
     }
 
+    static async removeAllChannelBlockIps (channelName: string) {
+        await this.removeChannelExpiredBlockIps(channelName, 0)
+    }
+
     static async isIpsBlockedByChannel (channelName: string, hosts: string[]) {
         const pipeline = store.pipeline()
         const channelBlockSetKey = this.getChannelBlockedIpSetKey(channelName)
@@ -271,7 +275,7 @@ export class ChannelIpDataModel implements ChannelIpData {
 
     readonly ip: string;
     readonly port: number;
-    readonly channelName: string = config.DEFAULT_CHANNEL_NAME;
+    readonly channelName: string = DefaultValueConfigs.DEFAULT_CHANNEL_NAME;
     readonly host: string;
 
     readonly usedCount: number = 0;
@@ -283,7 +287,7 @@ export class ChannelIpDataModel implements ChannelIpData {
     readonly location: string; // code
 
     get isDefaultChannel () {
-        return this.channelName === config.DEFAULT_CHANNEL_NAME
+        return this.channelName === DefaultValueConfigs.DEFAULT_CHANNEL_NAME
     }
 
     constructor(options: ChannelIpDataInitOptions) {
@@ -304,9 +308,10 @@ export class ChannelIpDataModel implements ChannelIpData {
         Object.assign(this, options)
     }
 
-    private _getChannelIpData(): ChannelIpData {
-        const { usedCount, validateCount, lastValidateTime, rtt, anonymity, httpType, location } = this
+    private _getChannelIpData(): ChannelIpDataDef {
+        const { usedCount, validateCount, lastValidateTime, rtt, anonymity, httpType, location, host } = this
         return {
+            host,
             usedCount,
             validateCount,
             lastValidateTime,
@@ -385,7 +390,7 @@ export class ChannelIpDataModel implements ChannelIpData {
 
 }
 
-export class GetIpRule implements CrawlRule {
+export class GetIpRule implements CrawlRuleDef {
     private static getRuleMapKey () {
         return generateRedisKey('getip-rule-map')
     }
@@ -394,58 +399,72 @@ export class GetIpRule implements CrawlRule {
         return generateRedisKey('getip-rule-used-count')
     }
 
-    private static _toJson (obj: any) {
-        let type = typeof obj
-        if (type === 'function') {
-            return {
-                type,
-                isLeafNode: true,
-                value: obj.toString(),
-            }
-        }
-        if (type !== 'object' || Array.isArray(obj)) {
-            return {
-                type,
-                isLeafNode: true,
-                value: obj
-            }
-        }
+    // private static _toJson (obj: any) {
+    //     let type = typeof obj
+    //     if (type === 'function') {
+    //         return {
+    //             type,
+    //             isLeafNode: true,
+    //             value: obj.toString(),
+    //         }
+    //     }
+    //     if (type !== 'object' || Array.isArray(obj)) {
+    //         return {
+    //             type,
+    //             isLeafNode: true,
+    //             value: obj
+    //         }
+    //     }
         
-        let jsonObj: any = {}
-        Object.keys(obj).forEach(key => {
-            const value = Reflect.get(obj, key)
-            Reflect.set(jsonObj, key, this._toJson(value))
-        })
-        return jsonObj
-    }
+    //     let jsonObj: any = {}
+    //     Object.keys(obj).forEach(key => {
+    //         const value = Reflect.get(obj, key)
+    //         Reflect.set(jsonObj, key, this._toJson(value))
+    //     })
+    //     return jsonObj
+    // }
 
-    private static _fromJson (obj: any) {
-        if (obj.isLeafNode) {
-            if (obj.type === 'function') {
-                const evalFuncBodyStr = `return ${obj.value}`
-                return new Function(evalFuncBodyStr)()
-            }
-            return obj.value
-        }
-        let originObj: any = {}
-        Object.keys(obj).forEach(key => {
-            const descriptor = Reflect.get(obj, key)
-            Reflect.set(originObj, key, this._fromJson(descriptor))
-        })
-        return originObj
-    }
+    // private static _fromJson (obj: any) {
+    //     if (obj.isLeafNode) {
+    //         if (obj.type === 'function') {
+    //             const evalFuncBodyStr = `return ${obj.value}`
+    //             return new Function(evalFuncBodyStr)()
+    //         }
+    //         return obj.value
+    //     }
+    //     let originObj: any = {}
+    //     Object.keys(obj).forEach(key => {
+    //         const descriptor = Reflect.get(obj, key)
+    //         Reflect.set(originObj, key, this._fromJson(descriptor))
+    //     })
+    //     return originObj
+    // }
 
     static async findRuleByName (ruleName: string) {
         const ruleJsonObj = await store.Store.HGET(this.getRuleMapKey(), ruleName)
-        return ruleJsonObj ? new this(this._fromJson(ruleJsonObj)) : null
+        return ruleJsonObj ? new this(fromJson(ruleJsonObj), false) : null
     }
 
     static async getRulesBySortedUsedCount (ruleCount?: number) {
         const allRuleJsonObjs = await store.Store.HGETALL(this.getRuleMapKey())
-        return allRuleJsonObjs.map(jsonObj => new this(this._fromJson(jsonObj.value))).slice(0, ruleCount)
+        return allRuleJsonObjs.map(jsonObj => new this(fromJson(jsonObj.value)), false).slice(0, ruleCount)
     }
 
-    constructor (options: Partial<CrawlRule>) {
+    private _getStorageData (): CrawlRuleDef {
+        const {name, url, itemSelector, itemStartIndex, itemInfoSelectors, pagination, interceptor, usedCount} = this
+        return {
+            name,
+            url,
+            itemSelector,
+            itemStartIndex,
+            itemInfoSelectors,
+            pagination,
+            interceptor,
+            usedCount,
+        }
+    }
+
+    constructor (options: Partial<CrawlRuleDef> & Pick<CrawlRuleDef, 'name'>, isInitial = false) {
         Object.assign(this, options)
     }
 
@@ -473,7 +492,7 @@ export class GetIpRule implements CrawlRule {
 
     async save () {
         const pipeline = store.pipeline()
-        await pipeline.HSET(GetIpRule.getRuleMapKey(), this.name, GetIpRule._toJson(this)).
+        await pipeline.HSET(GetIpRule.getRuleMapKey(), this.name, toJson(this._getStorageData())).
             ZADD(GetIpRule.getRuleUsedCountSetKey(), this.usedCount, this.name).
             exec()
     }
@@ -487,10 +506,10 @@ export class GetIpRule implements CrawlRule {
 }
 
 export async function init() {
-    let defaultChannel = await IpPoolChannel.findChannel(config.DEFAULT_CHANNEL_NAME)
+    let defaultChannel = await IpPoolChannel.findChannel(DefaultValueConfigs.DEFAULT_CHANNEL_NAME)
     if (!defaultChannel) {
         const defaultChannel = new IpPoolChannel({
-            channelName: config.DEFAULT_CHANNEL_NAME,
+            channelName: DefaultValueConfigs.DEFAULT_CHANNEL_NAME,
             validateUrl: 'https://www.baidu.com/baidu.html', // TODO
             httpValidateUrl: 'http://www.baidu.com/baidu.html',
         })
@@ -510,10 +529,10 @@ async function test() {
     await model.updateFeild('lastValidateTime', 300)
 
 
-    const allModels = await ChannelIpDataModel.findBySortableFeildOfRange(config.DEFAULT_CHANNEL_NAME, 'rtt', 0, 2000)
+    const allModels = await ChannelIpDataModel.findBySortableFeildOfRange(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, 'rtt', 0, 2000)
     console.log(allModels)
     await model.remove()
-    const allModels2 = await ChannelIpDataModel.findBySortableFeildOfRange(config.DEFAULT_CHANNEL_NAME, 'rtt', 0, 2000)
+    const allModels2 = await ChannelIpDataModel.findBySortableFeildOfRange(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, 'rtt', 0, 2000)
     console.log(allModels2)
     // await ChannelIpDataModel.removeChannelAllIps('www.baidu.com')
 
@@ -532,7 +551,7 @@ async function testBlock () {
     model.updateFeild('httpType', IpDataHttpTypes.https)
     await model.save()
     await model.block()
-    let res = await ChannelIpDataModel.isIpsBlockedByChannel(config.DEFAULT_CHANNEL_NAME, ['0.0.0.0:3001'])
+    let res = await ChannelIpDataModel.isIpsBlockedByChannel(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, ['0.0.0.0:3001'])
     console.log('')
 }
 
@@ -549,11 +568,11 @@ async function testCountAndExisted () {
     model.updateFeild('anonymity', IpDataAnonymities.high)
     model.updateFeild('httpType', IpDataHttpTypes.https)
     await model.save()
-    let res: any = await ChannelIpDataModel.isIpsExistedInChannel(config.DEFAULT_CHANNEL_NAME, [host])
-    res = await ChannelIpDataModel.countChannelIps(config.DEFAULT_CHANNEL_NAME)
+    let res: any = await ChannelIpDataModel.isIpsExistedInChannel(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, [host])
+    res = await ChannelIpDataModel.countChannelIps(DefaultValueConfigs.DEFAULT_CHANNEL_NAME)
     await model.remove()
-    res = await ChannelIpDataModel.isIpsExistedInChannel(config.DEFAULT_CHANNEL_NAME, [host])
-    res = await ChannelIpDataModel.countChannelIps(config.DEFAULT_CHANNEL_NAME)
+    res = await ChannelIpDataModel.isIpsExistedInChannel(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, [host])
+    res = await ChannelIpDataModel.countChannelIps(DefaultValueConfigs.DEFAULT_CHANNEL_NAME)
     console.log()
 }
 
@@ -561,12 +580,12 @@ async function testCountAndExisted () {
 
 async function testChannel () {
      const channel = new IpPoolChannel({
-        channelName: config.DEFAULT_CHANNEL_NAME,
+        channelName: DefaultValueConfigs.DEFAULT_CHANNEL_NAME,
         validateUrl: 'url'
     })
     await channel.save()
     const all = await IpPoolChannel.findAllChannel()
-    const defaultChannel = await IpPoolChannel.findChannel(config.DEFAULT_CHANNEL_NAME)
+    const defaultChannel = await IpPoolChannel.findChannel(DefaultValueConfigs.DEFAULT_CHANNEL_NAME)
     console.log(defaultChannel)
     // await channel.remove()
     // const all2 = await IpPoolChannel.findAllChannel()
@@ -610,7 +629,7 @@ async function testRemoveList() {
         validateUrl: ''
     }).save()
 
-    await ChannelIpDataModel.removeChannelIps(config.DEFAULT_CHANNEL_NAME, ['0.0.0.0:3001'])
+    await ChannelIpDataModel.removeChannelIps(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, ['0.0.0.0:3001'])
     const allModels2 = await ChannelIpDataModel.findBySortableFeildOfRange(testChannelName, 'rtt', null, null)
     console.log(allModels2)
     await ChannelIpDataModel.removeChannelIps('www.baidu.com', ['0.0.0.0:3001'])
@@ -647,7 +666,7 @@ async function removeChannelAllIp () {
     await model2.updateFeild('rtt', 1200)
     await model2.updateFeild('lastValidateTime', 300)
 
-    const defaultChannel = await IpPoolChannel.findChannel(config.DEFAULT_CHANNEL_NAME)
+    const defaultChannel = await IpPoolChannel.findChannel(DefaultValueConfigs.DEFAULT_CHANNEL_NAME)
     // defaultChannel.remove()
     testChannel.remove()
 }
@@ -657,7 +676,7 @@ async function removeChannelAllIp () {
 
 function testToJsonFromJson () {
     // @ts-ignore
-    const res = GetIpRule._toJson({
+    const res = toJson({
         func: () => console.log(1),
         object: {
             a: 1,
@@ -670,7 +689,7 @@ function testToJsonFromJson () {
     const str = JSON.stringify(res)
     const parsed = JSON.parse(str)
     // @ts-ignore
-    const origin = GetIpRule._fromJson(parsed)
+    const origin = fromJson(parsed)
     let funRes = origin.func()
     console.log(origin)
 }
@@ -686,11 +705,11 @@ async function testLocation () {
     })
     model.updateFeild('anonymity', IpDataAnonymities.high)
     model.updateFeild('httpType', IpDataHttpTypes.https)
-    model.updateFeild('location', config.UNKNOWN_LOCATION_CODE)
+    model.updateFeild('location', configs.UNKNOWN_LOCATION_CODE)
     await model.save()
     // await model.remove()
     // @ts-ignore
-    await ChannelIpDataModel.removeChannelAllIps(config.DEFAULT_CHANNEL_NAME)
+    await ChannelIpDataModel.removeChannelAllIps(DefaultValueConfigs.DEFAULT_CHANNEL_NAME)
 }
 
 // testLocation()
