@@ -1,8 +1,8 @@
 import got from 'got'
 import $ from 'cheerio'
+import iconv from 'iconv-lite'
 import colors from 'colors'
 import { CrawlRule, FreshIpData, BaseIpData, IpDataAnonymities, IpDataHttpTypes, FuncSelector } from '../type'
-
 
 export async function crawl (rule: CrawlRule) {
     const utils = rule.pagination ? {
@@ -17,11 +17,11 @@ export async function crawl (rule: CrawlRule) {
     for (let i = 1; i <= utils.maxPn; i ++) {
         const reqUrl = utils.getUrl(i)
         try {
-            const res = await got(reqUrl)
+            const res = await got.get(reqUrl)
             if (!res.headers['content-type'].includes('text/html')) {
                 throw new Error('不支持该类型网页')
             }
-            let freshIpDataArr: FreshIpData[] = ParseHtml.parse(res.body, rule)
+            let freshIpDataArr: FreshIpData[] = ParseHtml.parse(res.body, rule, res.rawBody)
             if (rule.interceptor) {
                 freshIpDataArr = rule.interceptor(freshIpDataArr)
             }
@@ -29,7 +29,7 @@ export async function crawl (rule: CrawlRule) {
             console.log(`rule: [${rule.name}]/ pn: ${i}/ ipCount: ${parsedItems.length}`)
         } catch (e) {
             console.log(colors.red(`[${rule.name}]:请求${reqUrl}失败`))
-            console.error(e.message)
+            console.error(e)
         }
         
     }
@@ -43,7 +43,7 @@ namespace ParseHtml {
             const valueRange = Object.values(enumObj)
             return function (enumValue) {
                 if (!valueRange.includes(enumValue)) {
-                    throw new Error(`${enumValue} not in enum type: ${enumObj}`)
+                    throw new Error(`${JSON.stringify(enumValue)} not in enum type: ${JSON.stringify(enumObj)}`)
                 }
                 return enumValue
             }
@@ -95,14 +95,14 @@ namespace ParseHtml {
         },
         rtt: (text) => {
             let timeUnit = 1
-            if (text.includes('秒')) {
+            if (text.includes('秒') || /[0-9]+(s|S)/.test(text)) {
                 timeUnit = 1000
             }
-            const matched = /[0-9]+/.exec(text)
+            const matched = /([0-9]+\.[0-9]+|[0-9]+)/.exec(text)
             const number = Number(matched && matched[0])
             return number * timeUnit
         },
-        location: (text) => text,
+        location: (text) => text.replace(/\s+/g, ''),
         httpType: (text) => {
             text = text.toLowerCase()
             if (text.includes('https')) {
@@ -111,12 +111,13 @@ namespace ParseHtml {
             if (text.includes('http')) {
                 return IpDataHttpTypes.http
             }
-            return null
+            return IpDataHttpTypes.unknown
         },
         anonymity: (text) => {
             if (text.includes('高匿')) {
                 return IpDataAnonymities.high
             }
+            // TODO unknown
             return IpDataAnonymities.no
         },
     }
@@ -168,8 +169,20 @@ namespace ParseHtml {
         return selected
     }
     
-    export function parse (htmlStr: string, rule: CrawlRule) { 
-        const $html = $.load(htmlStr)
+    export function parse (htmlStr: string, rule: CrawlRule, rowHtmlData: Buffer) { 
+        let $html = $.load(htmlStr)
+        let charset = ''
+        $html('meta').toArray().forEach(item => {
+            const v = item.attribs['charset']
+            if (v) {
+                charset = v
+            }
+        })
+        if (charset && charset.toLowerCase() !== 'utf-8') {
+            const str = iconv.decode(rowHtmlData, charset)
+            $html = $.load(str)
+        }
+
         const itemEles = $html(rule.itemSelector).toArray()
         const {itemStartIndex: startIndex = 0} = rule
         return itemEles.slice(startIndex).map((ele, index) => {
@@ -268,4 +281,39 @@ namespace ParseHtml {
 //         anonymity: 2,
 //         httpType: 3,
 //     },
+// })
+
+// crawl({
+//     name: '开心代理(高匿)',
+//     itemSelector: 'table > tbody > tr',
+//     pagination: {
+//         formatUrl: (pn) => `http://www.kxdaili.com/dailiip/1/${pn}.html`,
+//         maxPn: 5,
+//     },
+//     itemStartIndex: 0,
+//     itemInfoSelectors: {
+//         ip: 0,
+//         port: 1,
+//         rtt: 4,
+//         location: () => '中国',
+//         httpType: 3,
+//         anonymity: 2,
+//     }
+// })
+// crawl({
+//     name: 'nima代理(https)',
+//     itemSelector: 'body > div > div:nth-child(2) > div > table > tbody > tr',
+//     pagination: {
+//         formatUrl: (pn) => `http://www.nimadaili.com/https/${pn}/`,
+//         maxPn: 20,
+//     },
+//     itemStartIndex: 0,
+//     itemInfoSelectors: {
+//         ip: (ele) => ele('td:nth-child(1)').text().split(':')[0],
+//         port: (ele) => ele('td:nth-child(1)').text().split(':')[1],
+//         rtt: (ele) => Number(ele('td:nth-child(5)').text().trim()) * 1000,
+//         location: 3,
+//         httpType: 1,
+//         anonymity: 2,
+//     }
 // })

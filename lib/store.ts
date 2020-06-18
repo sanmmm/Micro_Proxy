@@ -3,7 +3,7 @@ import Redis from 'ioredis'
 import { SortedMap, SortedSet, generateRedisKey } from 'utils';
 import settings from 'getSettings'
 
-let redisCli = settings.REDIS_SERVER && new Redis(settings.REDIS_SERVER)
+let redisCli = settings.REDIS_SERVER_URL && new Redis(settings.REDIS_SERVER_URL)
 
 if (redisCli) {
     redisCli.select(1)
@@ -19,6 +19,13 @@ function getKeyValue<T = any>(key: string, initialValue?: T) {
         storage.set(key, initialValue)
     }
     return (value || initialValue) as T
+}
+
+function transformScoreValue (min: number, max: number) {
+    return {
+        min: min || (typeof min === 'number' ? min : '-inf'),
+        max: max || (typeof max === 'number' ? max : '+inf'),
+    }
 }
 
 class StoreModel {
@@ -63,44 +70,101 @@ class StoreModel {
             storage.delete(key)
         }
     }
-    async SADD<T = any>(key: string, value: T, pipeline: Redis.Pipeline): Promise<Redis.Pipeline>;
-    async SADD<T = any>(key: string, value: T): Promise<any>;
-    async SADD<T = any>(key: string, value: T, pipeline?: Redis.Pipeline) {
+    async INCR(key: string, pipeline: Redis.Pipeline): Promise<Redis.Pipeline>;
+    async INCR(key: string): Promise<number>;
+    async INCR(key: string, pipeline?: Redis.Pipeline) {
         if (isRedisMode) {
             if (pipeline) {
-                return pipeline.sadd(key, JSON.stringify(value))
+                return pipeline.incr(key)
             }
-            await redisCli.sadd(key, JSON.stringify(value))
+            return await redisCli.incr(key)
+        } else {
+            const oldValue = getKeyValue(key, 0)
+            const newValue = oldValue + 1;
+            storage.set(key, newValue)
+            return newValue
+        }
+    }
+    async INCRBY(key: string, increment: number, pipeline: Redis.Pipeline): Promise<Redis.Pipeline>;
+    async INCRBY(key: string, increment: number): Promise<number>;
+    async INCRBY(key: string, increment: number, pipeline?: Redis.Pipeline) {
+        if (isRedisMode) {
+            if (pipeline) {
+                return pipeline.incrby(key, increment)
+            }
+            return await redisCli.incrby(key, increment)
+        } else {
+            const oldValue = getKeyValue(key, 0)
+            const newValue = oldValue + increment;
+            storage.set(key, newValue)
+            return newValue
+        }
+    }
+    async SADD<T = any>(key: string, member: T | T[], pipeline: Redis.Pipeline): Promise<Redis.Pipeline>;
+    async SADD<T = any>(key: string, member: T | T[]): Promise<any>;
+    async SADD<T = any>(key: string, member: T | T[], pipeline?: Redis.Pipeline) {
+        const members = Array.isArray(member) ? member : [member]
+        if (!members.length) {
+            return
+        }
+        if (isRedisMode) {
+            const memberStrArr = members.map(value => JSON.stringify(value))
+            if (pipeline) {
+                return pipeline.sadd(key, ...memberStrArr)
+            }
+            await redisCli.sadd(key, ...memberStrArr)
         } else {
             const set = getKeyValue(key, new Set<T>())
-            set.add(value)
+            members.forEach(v => {
+                set.add(v)
+            })
         }
     }
-    async SREM<T = any>(key: string, value: T, pipeline: Redis.Pipeline): Promise<Redis.Pipeline>;
-    async SREM<T = any>(key: string, value: T): Promise<any>;
-    async SREM<T = any>(key: string, value: T, pipeline?: Redis.Pipeline) {
+    async SREM<T = any>(key: string, member: T | T[], pipeline: Redis.Pipeline): Promise<Redis.Pipeline>;
+    async SREM<T = any>(key: string, member: T | T[]): Promise<any>;
+    async SREM<T = any>(key: string, member: T | T[], pipeline?: Redis.Pipeline) {
+        const members = Array.isArray(member) ? member : [member]
+        if (!members.length) {
+            return
+        }
         if (isRedisMode) {
+            const memberStrArr = members.map(value => JSON.stringify(value))
             if (pipeline) {
-                return pipeline.srem(key, JSON.stringify(value))
+                return pipeline.srem(key, ...memberStrArr)
             }
-            await redisCli.srem(key, JSON.stringify(value))
+            await redisCli.srem(key, ...memberStrArr)
         } else {
             const set = getKeyValue(key, new Set())
-            set.delete(value)
+            members.forEach(m => {
+                set.delete(m)
+            })
         }
     }
-    async SMEMBERS<T = any>(key: string): Promise<T[]> {
+    async SHAS(key: string, member: any, pipeline: Redis.Pipeline): Promise<Redis.Pipeline>;
+    async SHAS(key: string, member: any): Promise<0 | 1>;
+    async SHAS(key: string, member: any, pipeline?: Redis.Pipeline) {
+        if (isRedisMode) {
+            if (pipeline) {
+                return pipeline.sismember(key, member)
+            }
+            return await redisCli.sismember(key, member)
+        } else {
+            const set = getKeyValue(key, new Set())
+            return set.has(member) ? 1 : 0
+        }
+    }
+    async SCAN<T = any>(key: string, count?: number): Promise<T[]> {
         if (isRedisMode) {
             let cursor = 0
-            const itemSet = new Set<T>()
+            const itemSet = new Set<string>()
             do {
                 const [nextCursor, strItems] = await redisCli.sscan(key, cursor, 'count', 500)
                 cursor = Number(nextCursor)
-                strItems.forEach(str => itemSet.add(JSON.parse(str)))
-            } while (!isNaN(cursor) && cursor !== 0)
-            return Array.from(itemSet)
+                strItems.forEach(str => itemSet.add(str))
+            } while (!isNaN(cursor) && cursor !== 0 && (typeof count !== 'number' || count > itemSet.size))
+            return Array.from(itemSet).map(str => JSON.parse(str))
         } else {
-            return Array.from(getKeyValue(key, new Set()))
+            return Array.from(getKeyValue(key, new Set<T>())).slice(0, typeof count !== 'number' ? count : undefined)
         }
     }
     async HSET<T = any>(key: string, feildName: string, feildValue: T, pipeline: Redis.Pipeline): Promise<Redis.Pipeline>
@@ -255,13 +319,16 @@ class StoreModel {
          if (pipeline) {
              return pipeline.zrange(key, min, max)
          } else {
-             return await redisCli.zrange(key, min, max)
+            const resArr = await redisCli.zrange(key, min, max)
+            return resArr.map(res => JSON.parse(res))
          }
      }
     async ZRANGEBYSCORE<T = any>(key: string, min: number, max: number, pipeline: Redis.Pipeline): Promise<Redis.Pipeline>;
     async ZRANGEBYSCORE<T = any>(key: string, min: number, max: number): Promise<T[]>;
     async ZRANGEBYSCORE<T = any>(key: string, min: number, max: number, pipeline?: Redis.Pipeline) {
+        const redisValueObj = transformScoreValue(min, max)
         if (isRedisMode) {
+            const {min, max} = redisValueObj
             if (pipeline) {
                 return pipeline.zrangebyscore(key, min, max)
             }
@@ -275,7 +342,9 @@ class StoreModel {
     async ZREMOVEBYSCORE<T = any>(key: string, min: number, max: number, pipeline: Redis.Pipeline): Promise<Redis.Pipeline>;
     async ZREMOVEBYSCORE<T = any>(key: string, min: number, max: number): Promise<any>;
     async ZREMOVEBYSCORE<T = any>(key: string, min: number, max: number, pipeline?: Redis.Pipeline) {
+        const redisValueObj = transformScoreValue(min, max)
         if (isRedisMode) {
+            const {min, max} = redisValueObj
             if (pipeline) {
                 return pipeline.zremrangebyscore(key, min, max)
             }
@@ -321,18 +390,19 @@ class StoreModel {
             const sortedSet = getKeyValue(key, new SortedSet())
             return sortedSet.scountByScore(min, max)
         }
+        const redisValueObj = transformScoreValue(min, max)
         if (pipeline) {
-            return pipeline.zcount(key, min, max)
+            return pipeline.zcount(key, redisValueObj.min, redisValueObj.max)
         } else {
-            return await redisCli.zcount(key, min, max)
+            return await redisCli.zcount(key, redisValueObj.min, redisValueObj.max)
         }
     }
-    async ZSCAN<T = any>(key: string): Promise<{member: T, score: number}[]> {
+    async ZSCAN<T = any>(key: string, count?: number): Promise<{member: T, score: number}[]> {
         if (isRedisMode) {
             let cursor = 0
             const items: {member: T, score: number}[] = []
             do {
-                const [nextCursor, strItems] = await redisCli.zscan(key, cursor, 'count', 500)
+                const [nextCursor, strItems] = await redisCli.zscan(key, cursor, 'count', 1000)
                 cursor = Number(nextCursor)
                 for (let i = 0; i < strItems.length; i += 2) {
                     const [memberStr, score] = strItems.slice(i, i + 2)
@@ -341,11 +411,11 @@ class StoreModel {
                         score: JSON.parse(score),
                     })
                 }
-            } while (!isNaN(cursor) && cursor !== 0)
+            } while ((!isNaN(cursor) && cursor !== 0) && (typeof count !== 'number' || count > items.length))
             return items
         } else {
             const sortedSet = getKeyValue(key, new SortedSet<T>())
-            return sortedSet.sscan()
+            return sortedSet.sscan().slice(0, typeof count !== 'number' ? count : undefined)
         }
     }
    
@@ -462,7 +532,7 @@ async function testPipeline() {
 
 async function testZadd() {
     await redisCli.pipeline().zadd('test123', 5 as any, '333').exec()
-    console.log(await redisCli.zscore('test123', '333'))
+    console.log(await redisCli.zscore('test123', '3334'))
 }
 
 // testZadd()
@@ -485,11 +555,26 @@ async function testSmembers () {
         redisCli.flushdb()
     }
     await pipeline().SADD('sset', 1).SADD('sset', 23).exec()
-    const res = await Store.SMEMBERS('sset')
+    const res = await Store.SCAN('sset')
     console.log(res)
 }
 
 // testSmembers()
+
+async function testBatchSAddSRem () {
+    if (redisCli) {
+        redisCli.select(1)
+        redisCli.flushdb()
+    }
+    await pipeline().SADD('sset', [1, 2, 3, 4]).exec()
+    await Store.SADD('sset', 5)
+    await Store.SADD('sset', [6, 7])
+    let res = await Store.SCAN('sset')
+    console.log(res)
+    res = await Store.SREM('sset', [1, 2, 3, 4, 5, 6, 7])
+}
+
+// testBatchSAddSRem()
 
 async function testHashGetall () {
     if (redisCli) {
@@ -564,3 +649,38 @@ async function testsrem () {
 }
 
 // testsrem()
+
+async function testZscan () {
+    const pipeline1 = pipeline()
+    for (let i = 0; i < 10000; i ++) {
+        pipeline1.ZADD('ss', i, i)
+    }
+    console.time('1')
+    await pipeline1.exec()
+    console.timeEnd('1')
+    console.time('2')
+    let res: any = await Store.ZSCAN('ss')
+    console.timeEnd('2')
+    console.time('3')
+    res = await redisCli.zrange('ss', 0, -1)
+    console.timeEnd('3')
+    console.time('4')
+    res = await redisCli.zrangebyscore('ss', 0, 10000)
+    console.timeEnd('4')
+    console.time('5')
+    res = await redisCli.zscan('ss', 0, 'count', 10000)
+    console.timeEnd('5')
+}
+
+// testZscan()
+
+async function testInf () {
+    await redisCli.zadd('testzset', -2, 'ss')
+    await redisCli.zadd('testzset', 2, 'ss1')
+    await redisCli.zadd('testzset', 2, 'ss2')
+
+    let res = await redisCli.zrangebyscore('testzset', '-inf', '+inf')
+    console.log(res)
+}
+
+// testInf()

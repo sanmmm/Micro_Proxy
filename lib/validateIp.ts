@@ -11,6 +11,13 @@ function getAgent(host: string) {
     }
 }
 
+function baseResValidate (res: Response<string>) {
+    if (!res.body) {
+        return false
+    }
+    return true
+}
+
 type UrlResValidator = string | RegExp | ((res: Response) => boolean)
 
 export async function baseValidate(aimUrl: string, host: string, maxRtt: number, validator?: UrlResValidator) {
@@ -34,14 +41,23 @@ export async function baseValidate(aimUrl: string, host: string, maxRtt: number,
          }
      }, maxRtt, 1)
     const rtt = Date.now() - startTime
-    let passed = !validator
-    if (validator instanceof Function) {
-        passed = validator(res)
-    } else if (validator instanceof RegExp) {
-        passed = validator.test(res.body)
-    } else if (typeof validator === 'string') {
-        passed = res.body.includes(validator)
+
+    const resValidators: UrlResValidator[] = [baseResValidate]
+    if (validator) {
+        resValidators.push(validator)
     }
+
+    const passed = resValidators.every((validator) => {
+        let passed = true
+        if (validator instanceof Function) {
+            passed = validator(res)
+        } else if (validator instanceof RegExp) {
+            passed = validator.test(res.body)
+        } else if (typeof validator === 'string') {
+            passed = res.body.includes(validator)
+        }
+        return passed
+    })
 
     if (!passed) {
         throw new Error(`使用${host}验证${aimUrl}失败`)
@@ -68,3 +84,9 @@ export async function validateAnonymity(host: string) {
 
 
 // baseValidate('https://www.baidu.com/baidu.html', 'http://58.220.95.78:9401')
+
+// baseValidate('http://www.baidu.com/baidu.html', 'http://39.137.69.10:80', 4000)
+// baseValidate('https://www.baidu.com/baidu.html', 'http://202.115.142.147:9200', 4000)
+
+// baseValidate('http://zhihu.com', 'http://27.188.62.3:8060', 4000)
+
