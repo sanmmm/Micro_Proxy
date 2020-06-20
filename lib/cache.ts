@@ -37,7 +37,7 @@ export function deleteCache (cacheKey: string) {
     cacheExpireMap.delete(cacheKey)
 }
 
-export async function tryGetCache<T = any> (cacheKey: string, getter: () => any, expire?: number): Promise<T> {
+export async function tryGetCache<T = any> (cacheKey: string, getter: () => Promise<T> | T, expire?: number): Promise<T> {
     let value = getCache(cacheKey)
     if (!value) {
         value = await getter()

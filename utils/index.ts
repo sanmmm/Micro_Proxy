@@ -2,11 +2,15 @@ export function generateRedisKey(key: string) {
     return `crwl-pool-${key}`
 }
 
+export function isLocalhostUrl (url: string) {
+    return url.includes('localhost')
+}
+
 type HandlerError = (e: Error, cb: (returnValue) => void, ...funcArgs: any[]) => any;
 
 type GetErrorNameSpace = string | (<T = any>(...args: T[]) => string)
 
-export function catchError(namespace?: GetErrorNameSpace, handleError?: HandlerError) {
+export function catchError(namespace: GetErrorNameSpace = '', handleError?: HandlerError) {
     return (target, propertyValue, descriptor: PropertyDescriptor) => {
         const func = descriptor.value.bind(target)
         descriptor.value = async function (...args) {
@@ -78,7 +82,7 @@ export function toJson (obj: any) {
     let jsonObj: any = {}
     Object.keys(obj).forEach(key => {
         const value = Reflect.get(obj, key)
-        Reflect.set(jsonObj, key, this._toJson(value))
+        Reflect.set(jsonObj, key, toJson(value))
     })
     return jsonObj
 }
@@ -94,11 +98,19 @@ export function fromJson (jsonObj: any) {
     let originObj: any = {}
     Object.keys(jsonObj).forEach(key => {
         const descriptor = Reflect.get(jsonObj, key)
-        Reflect.set(originObj, key, this._fromJson(descriptor))
+        Reflect.set(originObj, key, fromJson(descriptor))
     })
     return originObj
 }
 
+export function getMapValue <T = any> (map: Map<any, any>, key: any, defaultValue?: T): T {
+    let value = map.get(key)
+    if (!value && defaultValue !== undefined) {
+        value = defaultValue
+        map.set(key, defaultValue)
+    }
+    return value
+}
 
 type CompareFn<T = any> = (item: T) => number
 

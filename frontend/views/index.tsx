@@ -106,13 +106,13 @@ export default function IndexLayout(props) {
                 firstNode.click(reqProxyList.bind(null, pn - 1))
             }
             paginationNode.append(firstNode)
-            for (let i = 0; i < maxPn; i++) {
+            for (let i = 0; i <= maxPn; i++) {
                 const liEle = $(`<li class="${bindClass('page-item', pn === i && 'active')}"></li>`)
                 liEle.append(`<a class="page-link" href="#">${i + 1}</a>`)
                 liEle.click(reqProxyList.bind(null, i))
                 paginationNode.append(liEle)
             }
-            const lastNode = $(`<li class="${bindClass('page-item', pn === maxPn - 1 && 'disabled')}">
+            const lastNode = $(`<li class="${bindClass('page-item', pn === maxPn && 'disabled')}">
                 <a class="page-link" href="#" tabIndex={-1} aria-disabled="true">下一页</a>
             </li>`)
             if (pn !== maxPn) {
@@ -159,15 +159,6 @@ export default function IndexLayout(props) {
                 </tbody>
             </table>
             <ul id="pagination" className="pagination justify-content-center">
-                <li className="page-item disabled">
-                    <a className="page-link" href="#" tabIndex={-1} aria-disabled="true">上一页</a>
-                </li>
-                <li className="page-item"><a className="page-link" href="#">1</a></li>
-                <li className="page-item"><a className="page-link" href="#">2</a></li>
-                <li className="page-item"><a className="page-link" href="#">3</a></li>
-                <li className="page-item">
-                    <a className="page-link" href="#">下一页</a>
-                </li>
             </ul>
         </div>
         {scriptNode}

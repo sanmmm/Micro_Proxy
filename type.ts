@@ -1,11 +1,13 @@
-export enum IpDataHttpTypes {
+export enum IpDataHttpTypes { // 有序 可比对
+    unknown = -1,
     http = 1,
     https = 2,
 }
 
 export enum IpDataAnonymities {
-    high = 1,
-    no = 2,
+    unknown = -1,
+    no = 1,
+    high = 2,
 }
 
 export interface BaseIpData {
@@ -55,6 +57,7 @@ export interface CrawlRule {
 
 export interface CrawlRuleDef extends CrawlRule {
     usedCount: number;
+    isInRuleFile: boolean;
 }
 
 export enum IpPoolChannelStatus {
@@ -80,9 +83,13 @@ export interface ChannelIpDataDef {
     usedCount: number;
     validateCount: number;
     lastValidateTime: number;
+    nextValidateTime: number;
 
-    anonymity: number;
-    httpType: number;
+    // default channel properties
+    fromRule?: string;
+    anonymity?: number;
+    httpType?: number;
 
-    location: string;
+    location?: string;
+
 }
