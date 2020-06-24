@@ -1,8 +1,8 @@
 import React from 'react'
-import * as polished from 'polished'
 import { ClassNamesExport as BindClass } from 'classnames/types'
 
-import { ChannelIpDataDef, IpDataHttpTypes, IpDataAnonymities } from 'type'
+import { ChannelIpDataDef } from '@/type'
+import {IpDataAnonymities, IpDataHttpTypes} from '@/enum_types'
 import DefaultLayout from './base/layout'
 import { useScript, useStyle } from './base/hooks'
 
@@ -19,7 +19,7 @@ export default function IndexLayout(props) {
         classNames: BindClass;
         IpDataHttpTypes: typeof IpDataHttpTypes;
         IpDataAnonymities: typeof IpDataAnonymities;
-    }>(({ $, classes, classNames: bindClass, dayjs, IpDataAnonymities, IpDataHttpTypes, dayjs_plugin_relativeTime }) => {
+    }>(({ $, classes, classNames: bindClass, dayjs, IpDataAnonymities, IpDataHttpTypes, dayjs_plugin_relativeTime, }) => {
         const vars = {
             pn: 0,
             maxPn: 0,
@@ -128,6 +128,7 @@ export default function IndexLayout(props) {
     })
 
     const layoutProps = {
+        title: 'Micro Proxy',
         header: <React.Fragment>
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.4.1/dist/css/bootstrap.min.css"></link>
             <script src="https://cdn.jsdelivr.net/npm/classnames@2.2.6/index.min.js" />

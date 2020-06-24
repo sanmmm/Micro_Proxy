@@ -15,6 +15,7 @@ export const useScript = function <T>(func: (global: T) => any, deps: Partial<T>
     const ${depStrVarName} = '${JSON.stringify(deps)}';
     const ${depVarName} = JSON.parse(${depStrVarName});
     Object.assign(${depVarName}, window);
+    ${depVarName}.window = window;
     const ${funcName} = ${func.toString()};
     ${funcName}(${depVarName});
     `
