@@ -1,15 +1,16 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Table, Modal, Form, Input, Button, InputNumber, message, Card } from 'antd'
+import { Table, Modal, Form, Input, Button, InputNumber, message, Card, Descriptions } from 'antd'
 import { useRequest, request } from 'umi'
 import { FormOutlined, DeleteOutlined } from '@ant-design/icons'
 
 import styles from './index.less';
 
 type ResListItem = IpPoolChannelDef & {
+    isDefaultChannel: boolean;
     size: number;
     ruleIpCountInfoArr: {
         ruleName: string;
-        usedCount: number;
+        usedIpCount: number;
     }[]
 }
 
@@ -20,6 +21,7 @@ type Res = {
 
 enum ModalTypes {
     showEditOrCreateChannel = 1,
+    showChannelDetail
 }
 
 const formatDuation = (durationTime: number) => {
@@ -41,7 +43,7 @@ const formatDuation = (durationTime: number) => {
 }
 
 export default () => {
-    const [editItem, setEditItem] = useState(null as IpPoolChannelDef)
+    const [focusItem, setFocusItem] = useState(null as ResListItem)
     const [modalType, setModalType] = useState(null as ModalTypes)
     const [deleteData, setDeleteData] = useState(null as { channelName: string })
 
@@ -81,7 +83,7 @@ export default () => {
     }, [deleteData])
 
     const handleEditOrCreateChannelModalClose = useCallback(() => {
-        setEditItem(null)
+        setFocusItem(null)
         setModalType(null)
     }, [])
 
@@ -89,14 +91,19 @@ export default () => {
         reqChannels()
     }, [])
 
+    const handleChannelDetailModalClose = useCallback(() => {
+        setModalType(null)
+    }, [])
+
     return (
         <Card title="频道(channel)管理" className={styles.channelList} extra={<Button onClick={_ => {
             setModalType(ModalTypes.showEditOrCreateChannel)
-            setEditItem(null)
+            setFocusItem(null)
         }}>新建</Button>}>
-            <EditChannel item={editItem} onClose={handleEditOrCreateChannelModalClose} show={modalType === ModalTypes.showEditOrCreateChannel}
+            <EditChannel item={focusItem} onClose={handleEditOrCreateChannelModalClose} show={modalType === ModalTypes.showEditOrCreateChannel}
                 onRefresh={handleRefresh}
             />
+            <ChannelDetailModal channel={focusItem} show={modalType === ModalTypes.showChannelDetail} onClose={handleChannelDetailModalClose} />
             <Table
                 pagination={false}
                 showHeader
@@ -143,12 +150,20 @@ export default () => {
                         render: (value) => formatDuation(value),
                     },
                     {
+                        key: 'detail',
+                        title: '详情',
+                        render: (_, item) => <Button onClick={_ => {
+                            setModalType(ModalTypes.showChannelDetail)
+                            setFocusItem(item)
+                        }}>详情</Button>
+                    },
+                    {
                         key: 'action',
                         title: '操作',
                         render: (_, item) => {
                             return <div className={styles.actionArea}>
                                 <FormOutlined onClick={_ => {
-                                    setEditItem(item)
+                                    setFocusItem(item)
                                     setModalType(ModalTypes.showEditOrCreateChannel)
                                 }} />
                                 {
@@ -384,5 +399,77 @@ const EditChannel = React.memo<EditOrCreateChannelProps>((props) => {
                 </Form.Item>
             </Form>
         }
+    </Modal>
+})
+
+const getDedetailRenderConfigs = (channel: ResListItem) => {
+    if (!channel) {
+        return []
+    }
+    const list = [
+        {
+            label: '名称',
+            value: channel.channelName,
+        },
+        {
+            label: '验证地址',
+            value: channel.validateUrl,
+        },
+        {
+            label: '容量',
+            value: channel.volume
+        },
+        {
+            label: '最大延迟',
+            value: `${channel.maxRtt}ms`
+        },
+        {
+            label: 'ip有效期',
+            value: formatDuation(channel.itemLifeTime)
+        },
+        {
+            label: 'ip屏蔽有效期',
+            value: formatDuation(channel.itemBlockTime)
+        },
+        {
+            label: 'ip来源排行(前5名)',
+            value: channel.ruleIpCountInfoArr.length ? <Descriptions column={1} style={{ margin: 20 }}>
+                {
+                    channel.ruleIpCountInfoArr.slice(0, 5).map(item => <Descriptions.Item label={item.ruleName || '未命名'}>
+                        {item.usedIpCount}
+                    </Descriptions.Item>)
+                }
+            </Descriptions> : '暂无'
+        }
+    ]
+    if (channel.isDefaultChannel) {
+        list.splice(2, 0, {
+            label: 'http验证地址',
+            value: channel.httpValidateUrl,
+        })
+    }
+    return list
+}
+
+const ChannelDetailModal = React.memo<{
+    show: boolean;
+    channel: ResListItem;
+    onClose: () => any;
+}>(props => {
+    const { show, channel, onClose } = props
+
+    const renderConfigs = getDedetailRenderConfigs(channel)
+
+    return <Modal visible={show} title={`频道:${channel && channel.channelName}`}
+        footer={<Button onClick={onClose}>关闭</Button>}
+        onCancel={onClose}
+    >
+        <Descriptions column={1}>
+            {
+                renderConfigs.map(item => <Descriptions.Item key={item.label} label={item.label}>
+                    {item.value}
+                </Descriptions.Item>)
+            }
+        </Descriptions>
     </Modal>
 })

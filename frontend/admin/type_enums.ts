@@ -10,3 +10,9 @@ export enum IpDataAnonymities {
     no = 1,
     high = 2,
 }
+
+export enum ApiResCode {
+    success = 0,
+    error,
+    unauthorzied,
+}

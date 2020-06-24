@@ -10,6 +10,7 @@
     "baseUrl": "./",
     "strict": false,
     "paths": {
+      "@root/*": ["./*"],
       "@/*": ["src/*"],
       "@@/*": ["src/.umi/*"]
     },

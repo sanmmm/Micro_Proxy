@@ -5,7 +5,7 @@ import { FormOutlined, DeleteOutlined } from '@ant-design/icons'
 import JsonEditor, {JSONEditorOptions} from 'jsoneditor'
 import 'jsoneditor/dist/jsoneditor.css'
 
-import {fromJson, toJson, toPureJson} from '@/utils'
+import {fromJson, toJson, toPureJson, JsonSchema} from '@/utils'
 import styles from './index.less';
 
 type ResListItem = GetIpRuleDef & {
@@ -94,7 +94,7 @@ export default () => {
                         key: 'ruleGetIpCountInfo',
                         dataIndex: 'ruleGetIpCountInfo',
                         title: '通过率',
-                        render: (value: ResListItem['ruleGetIpCountInfo']) => `${value.invalidCount}/${value.validCount + value.invalidCount}`
+                        render: (value: ResListItem['ruleGetIpCountInfo']) => `${value.validCount}/${value.validCount + value.invalidCount}`
                     },
                     {
                         key: 'usedCount',
@@ -126,20 +126,6 @@ export default () => {
             />
         </Card>
     );
-}
-
-interface SchemaObjValue {
-    value: SchemaValue;
-    helper?: string | string[];
-    required?: boolean;
-}
-
-type SchemaStringValue = 'number' | 'string' | 'boolean' | 'array' | 'null' | 'object'
-
-type SchemaValue = SchemaObjValue | SchemaStringValue | SchemaStringValue[] | SchemaConfig
-
-interface SchemaConfig {
-    [key: string]: SchemaValue
 }
 
 function getRuleSchemaConfig (isEditMode = false) {
@@ -195,77 +181,7 @@ function getRuleSchemaConfig (isEditMode = false) {
         delete schemaConfig.name
     }
 
-    const isSchemaObjValue = (value: SchemaValue): value is SchemaObjValue => {
-        return typeof value === 'object' && !isSchemaArrValue(value) && !!value.value 
-    }
-
-    const isSchemaArrValue = (value: SchemaValue): value is SchemaStringValue[] => {
-        return Array.isArray(value)
-    }
-
-    const isSchemaStringValue = (value: SchemaValue): value is SchemaStringValue => {
-        return typeof value === 'string'
-    }
-
-    const isSchemaConfigValue = (value: SchemaValue): value is SchemaConfig => {
-        return typeof value === 'object' && !isSchemaArrValue(value) && !isSchemaObjValue(value)
-    }
-
-    const getJsonSchema = (schemaConfig: SchemaConfig) => {
-        const properties: object = {}, info: object = {}, requiredFeilds: string[] = []
-        Object.entries(schemaConfig).forEach(([feildName, feildValue]) => {
-            let typeValue: any = feildValue, transfromValue = null, helper: string | string[] = null, required = true, 
-                types: SchemaStringValue[] | SchemaStringValue = [], extra = null
-            if (isSchemaObjValue(feildValue)) {
-                typeValue = feildValue.value
-                required = feildValue.required
-                helper = feildValue.helper
-            }
-
-            if (isSchemaConfigValue(typeValue)) {
-                const res = getJsonSchema(typeValue)
-                transfromValue = res.jsonSchema
-                extra = res.info
-                types = 'object'
-            } else if (isSchemaArrValue(typeValue)) {
-                transfromValue = {
-                    anyof: typeValue.map(type => ({
-                        type
-                    }))
-                }
-                types = typeValue
-            } else if (isSchemaStringValue(typeValue)) {
-                transfromValue = {
-                    type: typeValue
-                }
-                types = [typeValue]
-            }
-
-            const infoItem = {
-                '类型': types,
-                '说明': helper || '无',
-                '必须项': required ? '是' : '否'
-            }
-            const isObjectValue = typeof types === 'string' && types === 'object'
-            if (isObjectValue) {
-                infoItem['属性'] = extra
-            }
-            Reflect.set(info, feildName, infoItem)
-            Reflect.set(properties, feildName, transfromValue)
-            if (required) {
-                requiredFeilds.push(feildName)
-            }
-        })
-        return {
-            info,
-            jsonSchema: {
-                type: 'object',
-                properties,
-                required: requiredFeilds,
-            }
-        }
-    }
-    return getJsonSchema(schemaConfig)
+    return JsonSchema.getJsonSchema(schemaConfig)
 }
 
 enum TabTypes {
