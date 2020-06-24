@@ -24,5 +24,5 @@
   },
   "files": ["./app.ts"],
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["./frontend/admin/*", "**/test/*.ts"]
+  "exclude": ["./frontend/*", "**/test/*.ts"]
 }

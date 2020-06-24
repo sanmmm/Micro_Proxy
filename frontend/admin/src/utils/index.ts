@@ -58,7 +58,7 @@ export function fromJson(jsonObj: any) {
 
 export namespace JsonSchema {
 
-    interface SchemaObjValue {
+    export interface SchemaObjValue {
         value: SchemaValue;
         helper?: string | string[];
         required?: boolean;
@@ -66,9 +66,9 @@ export namespace JsonSchema {
 
     type SchemaStringValue = 'number' | 'string' | 'boolean' | 'array' | 'null' | 'object'
 
-    type SchemaValue = SchemaObjValue | SchemaStringValue | SchemaStringValue[] | SchemaConfig
+    export type SchemaValue = SchemaObjValue | SchemaStringValue | SchemaStringValue[] | SchemaConfig
 
-    interface SchemaConfig {
+    export interface SchemaConfig {
         [key: string]: SchemaValue
     }
 

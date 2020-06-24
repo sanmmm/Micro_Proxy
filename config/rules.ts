@@ -1,5 +1,5 @@
-import { IpDataAnonymities, IpDataHttpTypes, CrawlRule } from "type"
-
+import {CrawlRule } from "type"
+import {IpDataAnonymities, IpDataHttpTypes} from 'enum_types'
 
 const rules: CrawlRule[] = [
     {

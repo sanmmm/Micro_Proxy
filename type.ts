@@ -1,14 +1,4 @@
-export enum IpDataHttpTypes { // 有序 可比对
-    unknown = -1,
-    http = 1,
-    https = 2,
-}
-
-export enum IpDataAnonymities {
-    unknown = -1,
-    no = 1,
-    high = 2,
-}
+import { IpDataHttpTypes, IpDataAnonymities } from "./enum_types"
 
 export interface BaseIpData {
     ip: string;
@@ -29,22 +19,22 @@ export interface PureIpData extends BaseIpData {
     validateCount: number;
 }
 
-export type FuncSelector = (itemEle: CheerioStatic, types: { IpDataHttpTypes: typeof IpDataHttpTypes, IpDataAnonymities: typeof IpDataAnonymities }) => any
+export type FuncSelector<EleType = any> = (itemEle: EleType, types: { IpDataHttpTypes: typeof IpDataHttpTypes, IpDataAnonymities: typeof IpDataAnonymities }) => any
 
-export type Selector = string | FuncSelector | number
+export type Selector<E = any> = string | FuncSelector<E> | number
 
-export interface CrawlRule {
+export interface CrawlRule<E = any> {
     name: string; // 规则名称
     url?: string;
-    itemSelector: Selector;
+    itemSelector: Selector<E>;
     itemStartIndex?: number;
     itemInfoSelectors: {
-        ip: Selector;
-        port: Selector;
-        location: Selector;
-        httpType: Selector;
-        anonymity: Selector;
-        rtt: Selector;
+        ip: Selector<E>;
+        port: Selector<E>;
+        location: Selector<E>;
+        httpType: Selector<E>;
+        anonymity: Selector<E>;
+        rtt: Selector<E>;
 
         [extraAttr: string]: any;
     };

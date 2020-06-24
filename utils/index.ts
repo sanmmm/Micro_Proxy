@@ -2,10 +2,6 @@ export function generateRedisKey(key: string) {
     return `crwl-pool-${key}`
 }
 
-export function isLocalhostUrl (url: string) {
-    return url.includes('localhost')
-}
-
 type HandlerError = (e: Error, cb: (returnValue) => void, ...funcArgs: any[]) => any;
 
 type GetErrorNameSpace = string | (<T = any>(...args: T[]) => string)

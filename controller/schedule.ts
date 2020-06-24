@@ -2,8 +2,9 @@ import { format as UrlFormat } from 'url';
 
 import { getLocationNameByCode, parseLocation } from 'utils/location'
 import { generateRedisKey, catchError, getMapValue } from 'utils';
-import { DefaultValueConfigs, configs } from 'getSettings'
-import { FreshIpData as WildIpData, IpDataHttpTypes, IpDataAnonymities, CrawlRule } from 'type'
+import { DefaultValueConfigs, configs, EditableConfigs } from 'getSettings'
+import { FreshIpData as WildIpData, CrawlRule } from 'type'
+import {IpDataHttpTypes, IpDataAnonymities} from 'enum_types'
 import * as cache from 'lib/cache'
 import getIpRules from 'config/rules'
 import { baseValidate } from 'lib/validateIp'
@@ -349,6 +350,14 @@ export namespace ValidateTasksManage {
         return getMapValue(TypedTaskCountMap, UtilFuncs.getTaskType(channelName, taskType), 0)
     }
 
+    export function getTaskQueueTaskCount () {
+        return UtilFuncs.getQueueTaskCount()
+    }
+
+    export function isRunning () {
+        return vars.status === ValidateTasksManageStatus.started
+    }
+
     // function updateConfig(config: ConfigOptions) {
     //     vars.maxThreadCount = config.threadCount
     //     setImmediate(() => {
@@ -378,13 +387,13 @@ export namespace ValidateTasksManage {
         vars.usedThreadCount = 0
     }
 
-    export function stop(clearTaskQueue: false) {
+    export function stop(clearTaskQueue = false) {
         if (vars.status !== ValidateTasksManageStatus.started) {
             throw new Error(`关闭失败: ValidateTasksManage 当前状态值为非启动状态: ${vars.status}`)
         }
 
         vars.status = ValidateTasksManageStatus.stopped
-        if (!clearTaskQueue) {
+        if (clearTaskQueue) {
             UtilFuncs.clearTaskDataQueue()
         }
     }
@@ -392,8 +401,8 @@ export namespace ValidateTasksManage {
 }
 
 export namespace ChannelScheduleManage {
-    const channelLoopTimerMap = new Map<string, NodeJS.Timer>()
-    const channelRemoveExpiredBlockIpsTimer = new Map<string, NodeJS.Timer>()
+    const channelLoopTimerMap = new Map<string, NodeJS.Timeout>()
+    const channelRemoveExpiredBlockIpsTimer = new Map<string, NodeJS.Timeout>()
     const channelLastScheduleTime = new Map<string, number>()
 
     const ChannelInitedMap = new Map<string, boolean>()
@@ -550,9 +559,12 @@ export namespace ChannelScheduleManage {
     export const { startChannelValidateTasksSchedule: startChannelSchedule, stopChannelValidateTasksSchedule: stopChannelSchedule } = Controllers
 }
 
-export default async function start(validateThreadCount: number) {
+async function start(validateThreadCount?: number) {
     await ModelInit()
     await getDefaultChannelAllIpDataList();
+    if (validateThreadCount === undefined) {
+        validateThreadCount = EditableConfigs.getConfig('proxyPoolServer').SERVER_MAX_VALIDATE_THREAD
+    }
     // const allChannels: IpPoolChannel[] = await IpPoolChannel.findAllChannel()
     // allChannels.forEach(channel => {
     //     globalVars.channelMap.set(channel.channelName, channel)
@@ -582,6 +594,20 @@ export default async function start(validateThreadCount: number) {
     runningChannels.forEach(channel => {
         ChannelScheduleManage.startChannelSchedule(channel, configs.CHANNEL_SCHEDULE_LOOP_INTERVAL)
     })
+}
+
+function stop () {
+    const { runningChannels } = IpPoolChannel.getChannelCache()
+    runningChannels.forEach(channel => {
+        ChannelScheduleManage.stopChannelSchedule(channel.channelName)
+    })
+    ValidateTasksManage.stop(true)
+
+}
+
+export default {
+    start,
+    stop,
 }
 
 

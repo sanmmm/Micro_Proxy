@@ -1,18 +1,24 @@
 import express from 'express'
 import httpProxy from 'http-proxy'
+import {format as UrlFormat} from 'url'
 
-import { catchError, fromJson, toJson, isLocalhostUrl } from 'utils'
-import injectedConfigs, { DefaultValueConfigs, configs } from 'getSettings';
+import { catchError, fromJson, toJson } from 'utils'
+import injectedConfigs, { DefaultValueConfigs, configs, EditableConfigs } from 'getSettings';
 import { IpPoolChannel, GetIpRule, ChannelIpDataModel } from 'models/model';
-import { ChannelScheduleManage, ValidateTasksManage } from './schedule'
+import schedule, { ChannelScheduleManage, ValidateTasksManage } from './schedule'
 import * as cache from 'lib/cache'
 import { ChannelIpDataDef, IpPoolChannelDef, IpPoolChannelStatus } from 'type';
+import {ApiResCode} from 'enum_types'
 
 namespace Decorators {
+    export const RouteCatchError = catchError('route', (e, cb, req: express.Request, res: express.Response) => {
+        res.send('server error')
+    })
+
     // catch error decorator
     export const ApiCatchError = catchError('api', (e, cb, req: express.Request, res: express.Response) => {
         res.json({
-            code: 1,
+            code: ApiResCode.error,
             msg: e.message,
         })
     })
@@ -29,17 +35,20 @@ namespace Decorators {
         return target()
     }
 
-    export const useApiProxy = (target?: ProxyTarget) => {
+    export const useApiProxy = (proxyTarget?: ProxyTarget) => {
         const decorator = (target, property, descriptor: TypedPropertyDescriptor<ApiHandler>) => {
             const func = descriptor.value.bind(target)
             const newFunc = async (...args: Parameters<ApiHandler>) => {
                 const [req, res] = args
-                const proxyTarget = getProxyTarget(target)
-                if (proxyTarget) {
+                const proxyTargetUrl = getProxyTarget(proxyTarget)
+                if (proxyTargetUrl) {
                     const target = httpProxy.createServer({
-                        target: proxyTarget
+                        target: proxyTargetUrl
                     })
-                    target.web(req, res)
+                    const reqCopy = Object.assign({}, req)
+                    Object.setPrototypeOf(reqCopy, Object.getPrototypeOf(req))
+                    reqCopy.url = req.originalUrl
+                    target.web(reqCopy, res)
                 } else {
                     return await func(...args)
                 }
@@ -59,7 +68,7 @@ namespace Decorators {
                 return await func(...args)
             }
             res.json({
-                code: 1,
+                code: ApiResCode.unauthorzied,
                 msg: 'unauthorzied'
             })
         }
@@ -138,11 +147,11 @@ namespace UtilFuncs {
 }
 
 const getProxyUrl = () => {
-    const { CRAWL_POOL_SERVER_URL } = injectedConfigs
-    if (isLocalhostUrl(CRAWL_POOL_SERVER_URL)) {
+    const { CRAWL_POOL_ADMIN_SERVER_URL } = injectedConfigs
+    if (!CRAWL_POOL_ADMIN_SERVER_URL) {
         return ''
     } else {
-        return CRAWL_POOL_SERVER_URL
+        return CRAWL_POOL_ADMIN_SERVER_URL
     }
 }
 
@@ -154,8 +163,55 @@ class AdminApiHandlers {
     @Decorators.useApiProxy(getProxyUrl)
     static async reqBaseInfo (req: express.Request, res: express.Response) {
         res.json({
-            code: 0,
+            code: ApiResCode.success,
+            isLogined: true,
             defaultConfigs: DefaultValueConfigs,            
+        })
+    }
+
+    @Decorators.RegisterRoute.get('/admin/info')
+    @Decorators.ApiCatchError
+    @Decorators.isAdmin
+    @Decorators.useApiProxy(getProxyUrl)
+    static async req (req: express.Request, res: express.Response) {
+        const channelIpPoolSize = await ChannelIpDataModel.countChannelIps(DefaultValueConfigs.DEFAULT_CHANNEL_NAME)
+        const {channelMap, channels} = IpPoolChannel.getChannelCache()
+        const defaultChannel = channelMap.get(DefaultValueConfigs.DEFAULT_CHANNEL_NAME)
+        const channelsStatusInfo = channels.reduce((countObj, item) => {
+            countObj.total ++
+            if (item.isPaused) {
+                countObj.pausedChannelCount ++
+            } else {
+                countObj.runningChannelCount ++
+            }
+            return countObj
+        }, {
+            total: 0,
+            runningChannelCount: 0,
+            pausedChannelCount: 0,
+        })
+
+        const ruleCount = await GetIpRule.getRuleCount()
+
+        const validateTaskCount = ValidateTasksManage.getTaskQueueTaskCount()
+
+        const serverUrl = injectedConfigs.CRAWL_POOL_ADMIN_SERVER_URL
+
+        const adminConfigs = EditableConfigs.getConfig('admin')
+        const proxyPoolServerConfigs = EditableConfigs.getConfig('proxyPoolServer')
+
+        res.json({
+            code: ApiResCode.success,
+            serverUrl,
+            adminConfigs,
+            proxyPoolServerConfigs,
+            validateTaskCount,
+            ruleCount,
+            channelsStatusInfo,
+            defaultChannelInfo: {
+                ...defaultChannel,
+                size: channelIpPoolSize,
+            }
         })
     }
 
@@ -168,18 +224,16 @@ class AdminApiHandlers {
         const tasks = await channels.map(async channel => {
             const ruleIpCountInfoArr = await IpPoolChannel.getChannelRulesIpCountRecord(channel.channelName)
             const channelIpPoolSize = await ChannelIpDataModel.countChannelIps(channel.channelName)
-            // return cache.tryGetCache(UtilFuncs.getChannelRelatedRuleIpCountCacheKey(channel.channelName), async () => {
-            //     return IpPoolChannel.getChannelRulesIpCountRecord(channel.channelName)
-            // }, 1000 * 60 * 5)
             return {
                 ...channel,
+                isDefaultChannel: channel.channelName === DefaultValueConfigs.DEFAULT_CHANNEL_NAME,
                 ruleIpCountInfoArr,
                 size: channelIpPoolSize
             }
         })
         const list = await Promise.all(tasks)
         res.json({
-            code: 0,
+            code: ApiResCode.success,
             // channelRuleIpCountArr: channelRuleIpCountInfoArr,
             list,
         })
@@ -207,7 +261,7 @@ class AdminApiHandlers {
             ChannelScheduleManage.startChannelSchedule(channel, configs.CHANNEL_SCHEDULE_LOOP_INTERVAL)
         }
         res.json({
-            code: 0,
+            code: ApiResCode.success,
             channel
         })
     }
@@ -269,7 +323,7 @@ class AdminApiHandlers {
             ChannelScheduleManage.startChannelSchedule(channel, configs.CHANNEL_SCHEDULE_LOOP_INTERVAL)
         }
         res.json({
-            code: 0,
+            code: ApiResCode.success,
             channel
         })
     }
@@ -293,7 +347,7 @@ class AdminApiHandlers {
         await IpPoolChannel.getChannelCache(true)
 
         res.json({
-            code: 0,
+            code: ApiResCode.success,
         })
     }
 
@@ -313,7 +367,7 @@ class AdminApiHandlers {
         const list = await Promise.all(tasks)
         // const ruleGetIpCountInfo = await Promise.all(tasks)
         res.json({
-            code: 0,
+            code: ApiResCode.success,
             // ipCountInfoList: ruleGetIpCountInfo,
             list: list.map(rule => toJson(rule))
         })
@@ -334,7 +388,7 @@ class AdminApiHandlers {
         const rule = new GetIpRule(ruleData)
         await rule.save()
         res.json({
-            code: 0,
+            code: ApiResCode.success,
             rule: toJson(rule),
         })
     }
@@ -361,7 +415,7 @@ class AdminApiHandlers {
         Object.assign(rule, ruleData)
         await rule.save()
         res.json({
-            code: 0,
+            code: ApiResCode.success,
             rule: toJson(rule),
         })
     }
@@ -378,7 +432,7 @@ class AdminApiHandlers {
         }
         await rule.remove()
         res.json({
-            code: 0,
+            code: ApiResCode.success,
         })
     }
 
@@ -396,42 +450,98 @@ class AdminApiHandlers {
         } 
         req.session.isAdmin = true
         res.json({
-            code: 0,
+            code: ApiResCode.success,
         })
     }
 
-    @Decorators.RegisterRoute.get('/sysytemconfigs')
+    @Decorators.RegisterRoute.post('/logout')
     @Decorators.ApiCatchError
     @Decorators.isAdmin
     @Decorators.useApiProxy(getProxyUrl)
-    static async getSystemConfig(req: express.Request, res: express.Response) {
-
+    static async adminLogout (req: express.Request, res: express.Response) {
+        if (!req.session.isAdmin) {
+            throw new Error('越权操作')
+        }
+        req.session.isAdmin = false
+        res.json({
+            code: ApiResCode.success,
+        })
     }
 
-    @Decorators.RegisterRoute.post('/sysytemconfig/edit')
+    @Decorators.RegisterRoute.post('/proxypoolconfig/edit')
     @Decorators.ApiCatchError
     @Decorators.isAdmin
     @Decorators.useApiProxy(getProxyUrl)
     static async editSystemConfig(req: express.Request, res: express.Response) {
+        const oldConfigs = {
+            ...EditableConfigs.getConfig('proxyPoolServer')
+        }
+        const validators = {
+            SERVER_MAX_VALIDATE_THREAD: (v) => {
+                if (v <= 0) {
+                    throw new Error('invalid validateThread count')
+                }
+            }
+        }
+        Object.keys(req.body).forEach(key => {
+            const value = Reflect.get(req.body, key)
+            const validator = Reflect.get(validators, key)
+            validator && validator(value)
+        })
+        EditableConfigs.setConfig('proxyPoolServer', {
+            ...req.body
+        })
 
+        const isModified = (feildName) => Reflect.get(req.body, feildName) !== undefined
+        const {SERVER_MAX_VALIDATE_THREAD, SERVER_RUNNING} = req.body
+        if (isModified('SERVER_MAX_VALIDATE_THREAD') && oldConfigs.SERVER_MAX_VALIDATE_THREAD !== SERVER_MAX_VALIDATE_THREAD) {
+            // EditableConfigs.setConfig('proxyPoolServer', {
+            //     SERVER_MAX_VALIDATE_THREAD: validateThread
+            // })
+            if (ValidateTasksManage.isRunning()) {
+                ValidateTasksManage.stop()
+                ValidateTasksManage.start({
+                    threadCount: SERVER_MAX_VALIDATE_THREAD,
+                    getChannelData: (name) => {
+                        const {channelMap} = IpPoolChannel.getChannelCache()
+                        return channelMap.get(name)
+                    }
+                },)
+            }
+        }
+
+        if (isModified('SERVER_RUNNING') && oldConfigs.SERVER_RUNNING !== SERVER_RUNNING) {
+            if (SERVER_RUNNING) {
+                schedule.start(EditableConfigs.getConfig('proxyPoolServer').SERVER_MAX_VALIDATE_THREAD)
+            } else {
+                schedule.stop()
+            }
+        }
+        res.json({
+            code: ApiResCode.success
+        })
     }
 
-    @Decorators.RegisterRoute.get('/clientconfigs')
+
+    @Decorators.RegisterRoute.post('/adminconfig/edit')
     @Decorators.ApiCatchError
     @Decorators.isAdmin
-    static async getClientConfig(req: express.Request, res: express.Response) {
-
-    }
-
-    @Decorators.RegisterRoute.post('/clientconfig/edit')
-    @Decorators.ApiCatchError
-    @Decorators.isAdmin
-    static async editClientConfig(req: express.Request, res: express.Response) {
-
+    static async editAdminConfig(req: express.Request, res: express.Response) {
+        const {showExampleProxyListPage} = req.body
+        const {SHOW_EXAMPLE_PROXY_LIST_PAGE} = EditableConfigs.getConfig('admin')
+        if (!!showExampleProxyListPage !== SHOW_EXAMPLE_PROXY_LIST_PAGE) {
+            EditableConfigs.setConfig('admin', {
+                SHOW_EXAMPLE_PROXY_LIST_PAGE: showExampleProxyListPage
+            })
+        }
+        res.json({
+            code: ApiResCode.success
+        })
     }
 
     @Decorators.RegisterRoute.get('/proxy/list')
     @Decorators.ApiCatchError
+    @Decorators.useApiProxy(getProxyUrl)
     static async getProxyIpList (req: express.Request, res: express.Response) {
         let {pn: pnValue} = req.query
         const pn = pnValue ? Number(pnValue) : 0
@@ -444,13 +554,27 @@ class AdminApiHandlers {
         }, 1000 * 60 * 3)
         const offset = pn * limit
         res.json({
-            code: 0,
+            code: ApiResCode.success,
             maxPn: maxPn - 1,
             list: proxyIpList.slice(offset, offset + limit)
         })
+    }
+
+}
+
+class OtherRouteHandlers {
+    @Decorators.RouteCatchError
+    static renderProxyListPage (req: express.Request, res: express.Response) {
+        const {SHOW_EXAMPLE_PROXY_LIST_PAGE} = EditableConfigs.getConfig('admin')
+        if (!SHOW_EXAMPLE_PROXY_LIST_PAGE) {
+            res.sendStatus(404)
+        } else {
+            res.render('index')
+        }
     }
 }
 
 export default function registerRoute (app: express.Express) {
     Decorators.RegisterRoute.listen(app)
+    app.get('/proxylist', OtherRouteHandlers.renderProxyListPage)
 }

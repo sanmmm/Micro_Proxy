@@ -1,7 +1,8 @@
 import { URL, format as UrlFormat } from 'url'
 
 import * as store from 'lib/store'
-import {IpDataAnonymities, IpDataHttpTypes, CrawlRuleDef, Selector, FreshIpData, IpPoolChannelStatus, IpPoolChannelDef, ChannelIpDataDef} from 'type'
+import {CrawlRuleDef, Selector, FreshIpData, IpPoolChannelStatus, IpPoolChannelDef, ChannelIpDataDef} from 'type'
+import {IpDataHttpTypes, IpDataAnonymities} from 'enum_types'
 import { generateRedisKey, fromJson, toJson} from 'utils';
 import settings, { DefaultValueConfigs, configs } from 'getSettings'
 import * as cache from 'lib/cache';
@@ -734,6 +735,10 @@ export class GetIpRule implements CrawlRuleDef {
 
     private static getRuleCrawlIpCountKey (ruleName: string, type: RuleGetIpValidTypes) {
         return generateRedisKey(`getip-rule-${ruleName}-getip-${type}-count`)
+    }
+
+    static getRuleCount () {
+        return store.Store.HLEN(this.getRuleMapKey())
     }
 
     static findRuleByName (ruleName: string): Promise<GetIpRule>

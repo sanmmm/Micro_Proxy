@@ -5,7 +5,7 @@ import { FormOutlined, DeleteOutlined } from '@ant-design/icons'
 import JsonEditor, {JSONEditorOptions} from 'jsoneditor'
 import 'jsoneditor/dist/jsoneditor.css'
 
-import {fromJson, toJson, toPureJson, JsonSchema} from '@/utils'
+import {fromJson, toJson, toPureJson, JsonSchema,} from '@/utils'
 import styles from './index.less';
 
 type ResListItem = GetIpRuleDef & {
@@ -130,7 +130,7 @@ export default () => {
 
 function getRuleSchemaConfig (isEditMode = false) {
 
-    const Selector: SchemaObjValue = {
+    const Selector: JsonSchema.SchemaObjValue = {
         value: ['number', 'string'],
         required: true,
         helper: ['type = string | FuncSelector | number', 'type FuncSelector = (itemEle: CheerioStatic, types: { IpDataHttpTypes: typeof IpDataHttpTypes, IpDataAnonymities: typeof IpDataAnonymities }) => any']
@@ -144,7 +144,7 @@ function getRuleSchemaConfig (isEditMode = false) {
         }
     }
 
-    const schemaConfig: SchemaConfig = {
+    const schemaConfig: JsonSchema.SchemaConfig = {
         name: 'string',
         url: {
             value: 'string',

@@ -21,45 +21,61 @@ export const configs = {
 }
 
 export namespace EditableConfigs {
-    const DefaultEditableConfigs = {
-        // server configs
-        SERVER_MAX_VALIDATE_THREAD: 50,
-        // client configs
-        CLIENT_SHOW_EXAMPLE_PROXY_LIST_PAGE: true,
-    }
-    
-
-    let configs: typeof DefaultEditableConfigs = null
+    const EditableConfigDefaultValue = {
+        proxyPoolServer: {
+            SERVER_MAX_VALIDATE_THREAD: 50,
+            SERVER_RUNNING: true,
+        },
+        admin: {
+            SHOW_EXAMPLE_PROXY_LIST_PAGE: true,
+        },
+    }    
 
     const EDITABLE_CONFIG_FILE_NAME = 'editable_config.json'
+    
+    const readConfigsFromFile = () => {
+        let configStr = null
+        if (fs.existsSync(EDITABLE_CONFIG_FILE_NAME)) {
+            configStr = fs.readFileSync(EDITABLE_CONFIG_FILE_NAME, {
+                encoding: 'utf-8'
+            })
+        }
+        return JSON.parse(configStr) || {
+            ...EditableConfigDefaultValue
+        }
+    }
 
-    export function setConfig (obj: Partial<typeof DefaultEditableConfigs>) {
-        Object.assign(configs, obj)
+    const saveConfigsToFile = () => {
         fs.writeFileSync(EDITABLE_CONFIG_FILE_NAME, JSON.stringify(configs))
     }
 
-    export function getConfig () {
-        if (!configs) {
-            const configStr = fs.readFileSync(EDITABLE_CONFIG_FILE_NAME, {
-                encoding: 'utf-8'
-            })
-            configs = {
-                ...DefaultEditableConfigs,
-                ...JSON.parse(configStr),
-            }
-        }
-        return configs
+    const configs: typeof EditableConfigDefaultValue = readConfigsFromFile()
+
+    export type ConfigDef = typeof EditableConfigDefaultValue
+    
+    type ConfigNamespace = keyof typeof EditableConfigDefaultValue
+    export function setConfig<T extends ConfigNamespace> (namespace: T, modifiedObj: Partial<ConfigDef[T]>) {
+        const subConfigObj = Reflect.get(configs, namespace)
+        Object.assign(subConfigObj, modifiedObj)
+        saveConfigsToFile()
     }
+
+    export function getConfig<T extends ConfigNamespace> (namespace: T): ConfigDef[T] {
+        return Reflect.get(configs, namespace)
+    }
+
 }
 
 const injectedConfigs = {
     IS_PRODUCTION_MODE: process.env.NODE_ENV === 'production',
     REDIS_SERVER_URL: process.env.REDIS_SERVER || 'redis://localhost',
-    CRAWL_POOL_SERVER_PORT: process.env.CRAWL_POOL_SERVER_PORT || 3003,
-    CRAWL_POOL_SERVER_URL: process.env.CRAWL_POOL_SERVER_URL || 'localhost',
-    CRAWL_POOL_ADMIN_USERNAME: process.env.CRAWL_POOL_SERVER_USERNAME,
-    CRAWL_POOL_ADMIN_PASSWORD: process.env.CRAWL_POOL_SERVER_PASSWORD,
+    CRAWL_POOL_ADMIN_CLIENT_PORT: process.env.CRAWL_POOL_ADMIN_CLIENT_PORT || 3003,
+    CRAWL_POOL_ADMIN_SERVER_URL: process.env.CRAWL_POOL_ADMIN_SERVER_URL, // not required
+    CRAWL_POOL_ADMIN_USERNAME: process.env.CRAWL_POOL_ADMIN_USERNAME,
+    CRAWL_POOL_ADMIN_PASSWORD: process.env.CRAWL_POOL_ADMIN_PASSWORD,
     CRAWL_POOL_ADMIN_SESSION_SECRET: process.env.CRAWL_POOL_ADMIN_SESSION_SECRET || 'secret',
 }
 
+
 export default injectedConfigs
+

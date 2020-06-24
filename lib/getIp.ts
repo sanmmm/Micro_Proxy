@@ -2,9 +2,12 @@ import got from 'got'
 import $ from 'cheerio'
 import iconv from 'iconv-lite'
 import colors from 'colors'
-import { CrawlRule, FreshIpData, BaseIpData, IpDataAnonymities, IpDataHttpTypes, FuncSelector } from '../type'
+import { CrawlRule, FreshIpData, BaseIpData, FuncSelector } from '../type'
+import {IpDataAnonymities, IpDataHttpTypes} from 'enum_types'
 
-export async function crawl (rule: CrawlRule) {
+type RealCrawlRule = CrawlRule<CheerioStatic>
+
+export async function crawl (rule: RealCrawlRule) {
     const utils = rule.pagination ? {
         getUrl: (pn: number) => rule.pagination.formatUrl(pn),
         maxPn: rule.pagination.maxPn,
@@ -169,7 +172,7 @@ namespace ParseHtml {
         return selected
     }
     
-    export function parse (htmlStr: string, rule: CrawlRule, rowHtmlData: Buffer) { 
+    export function parse (htmlStr: string, rule: RealCrawlRule, rowHtmlData: Buffer) { 
         let $html = $.load(htmlStr)
         let charset = ''
         $html('meta').toArray().forEach(item => {

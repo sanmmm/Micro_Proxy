@@ -4,16 +4,23 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "ts-node-dev --project ts_build_config.json -r tsconfig-paths/register --no-deps --ignore-watch 'frontend' app.ts",
-    "dev": "nodemon -e js,mjs,json,ts --ignore 'frontend/*' --exec ts-node --project ts_build_config.json -r tsconfig-paths/register app.ts",
-    "debug": "cross-env NODE_ENV=development SESSION_TYPE=token node --inspect -r tsconfig-paths/register -r ts-node/register app.ts",
-    "build": "tsc -p ts_build_config.json",
+    "start": "ts-node-dev --project tsconfig.json -r tsconfig-paths/register --no-deps --ignore-watch 'frontend' --inspect -- app.ts",
+    "debug": "cross-env node --inspect -r tsconfig-paths/register -r ts-node/register app.ts",
+    "build": "tsc -p tsconfig.json",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "runts": "ts-node"
+    "runts": "ts-node",
+    "test1": "cross-env CRAWL_POOL_ADMIN_SERVER_URL=http://localhost:3003 CRAWL_POOL_ADMIN_CLIENT_PORT=3004 npm start",
+    "test2": "cross-env CRAWL_POOL_ADMIN_CLIENT_PORT=3005 ts-node-dev --project tsconfig.json -r tsconfig-paths/register --no-deps --ignore-watch 'frontend' --inspect -- app.ts",
+    "test3": "cross-env CRAWL_POOL_ADMIN_CLIENT_PORT=3005 ts-node --project tsconfig.json -r tsconfig-paths/register app.ts"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@babel/core": "^7.10.3",
+    "@babel/preset-env": "^7.10.3",
+    "@babel/preset-react": "^7.10.1",
+    "@babel/preset-typescript": "^7.10.1",
+    "@babel/register": "^7.10.3",
     "@types/cheerio": "^0.22.18",
     "@types/classnames": "^2.2.10",
     "@types/colors": "^1.2.1",
@@ -28,13 +35,16 @@
     "@types/ioredis": "^4.16.2",
     "@types/jquery": "^3.3.38",
     "@types/jss": "^10.0.0",
+    "@types/morgan": "^1.9.1",
     "@types/react": "^16.9.37",
     "@types/react-dom": "^16.9.8",
     "@types/typescript": "^2.0.0",
+    "babel-plugin-module-resolver": "^4.0.0",
     "cheerio": "^1.0.0-rc.3",
     "classnames": "^2.2.6",
     "colors": "^1.4.0",
     "compression": "^1.7.4",
+    "cross-env": "^7.0.2",
     "dotenv": "^8.2.0",
     "express": "^4.17.1",
     "express-react-views": "^0.11.0",
@@ -47,6 +57,7 @@
     "ioredis": "^4.17.1",
     "jss": "^10.3.0",
     "jss-preset-default": "^10.3.0",
+    "morgan": "^1.10.0",
     "polished": "^3.6.5",
     "react": "^16.13.1",
     "react-dom": "^16.13.1",
@@ -55,8 +66,5 @@
     "tsconfig-paths": "^3.9.0",
     "typescript": "^3.9.2"
   },
-  "devDependencies": {
-    "@types/nodemon": "^1.19.0",
-    "nodemon": "^2.0.4"
-  }
+  "devDependencies": {}
 }

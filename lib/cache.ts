@@ -10,6 +10,8 @@ function getCacheAndValidate (cacheKey: string) {
     if (isValidExpireTime(expireTime)) {
         const isExpired = expireTime <= Date.now()
         if (isExpired) {
+            cache.delete(cacheKey)
+            cacheExpireMap.delete(cacheKey)
             return null
         }
     }
