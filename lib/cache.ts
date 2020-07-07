@@ -63,17 +63,3 @@ export function deleteMapCache (cacheKey: string, mapKey: string) {
     return mapCache.delete(mapKey)
 }
 
-
-function test () {
-    let res: any = isValidExpireTime(null)
-    res = isValidExpireTime(1)
-    res = isValidExpireTime(NaN)
-    setCache('testexpire', 1)
-    res = getCache('testexpire')
-    setCache('testexpire', 2, -1)
-    res = getCache('testexpire')
-    res = getCache('testexpire', 3)
-    console.log(res)
-}
-
-// test()

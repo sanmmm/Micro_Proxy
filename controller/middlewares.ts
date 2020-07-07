@@ -48,8 +48,8 @@ class SessionStore extends expressSesion.Store {
 
 export function session (req: express.Request, res: express.Response, next: express.NextFunction) {
     expressSesion({
-        // resave: true,
-        // saveUninitialized: true,
+        resave: true,
+        saveUninitialized: false,
         secret: injectedConfigs.CRAWL_POOL_ADMIN_SESSION_SECRET,
         store: new SessionStore({}),
         cookie: {

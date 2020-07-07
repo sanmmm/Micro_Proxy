@@ -72,21 +72,10 @@ export async function baseValidate(aimUrl: string, host: string, maxRtt: number,
 }
 
 export async function validateLocation(host: string) {
-
+    // TODO
 }
 
 export async function validateAnonymity(host: string) {
-
+    // TODO
 }
-
-// baseValidate('http://110.243.26.111:9999', 'http://110.243.26.111:9999')
-// baseValidate('https://www.baidu.com/baidu.html', 'http://110.243.26.111:9999')
-
-
-// baseValidate('https://www.baidu.com/baidu.html', 'http://58.220.95.78:9401')
-
-// baseValidate('http://www.baidu.com/baidu.html', 'http://39.137.69.10:80', 4000)
-// baseValidate('https://www.baidu.com/baidu.html', 'http://202.115.142.147:9200', 4000)
-
-// baseValidate('http://zhihu.com', 'http://27.188.62.3:8060', 4000)
 

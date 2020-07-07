@@ -234,7 +234,6 @@ class AdminApiHandlers {
         const list = await Promise.all(tasks)
         res.json({
             code: ApiResCode.success,
-            // channelRuleIpCountArr: channelRuleIpCountInfoArr,
             list,
         })
     }
@@ -255,7 +254,6 @@ class AdminApiHandlers {
         }
         const channel = await new IpPoolChannel(req.body)
         await channel.save()
-        // cache.setMapCache(configs.CHANNEL_CACHE_KEY, channelName, channel)
         await IpPoolChannel.getChannelCache(true)
         if (!channel.isPaused) {
             ChannelScheduleManage.startChannelSchedule(channel, configs.CHANNEL_SCHEDULE_LOOP_INTERVAL)
@@ -288,7 +286,6 @@ class AdminApiHandlers {
         await IpPoolChannel.removeChannelRelatedRuleIpCountRecord(channel.channelName)
         await IpPoolChannel.getChannelCache(true)
 
-        // cache.setMapCache(configs.CHANNEL_CACHE_KEY, channel.channelName, channel)
         ChannelScheduleManage.stopChannelSchedule(channel.channelName)
 
         const clearFunc = {
@@ -343,7 +340,6 @@ class AdminApiHandlers {
         }
         ChannelScheduleManage.stopChannelSchedule(channel.channelName)
         await channel.remove()
-        // cache.deleteMapCache(configs.CHANNEL_CACHE_KEY, channelName)
         await IpPoolChannel.getChannelCache(true)
 
         res.json({
@@ -365,10 +361,8 @@ class AdminApiHandlers {
             }
         })
         const list = await Promise.all(tasks)
-        // const ruleGetIpCountInfo = await Promise.all(tasks)
         res.json({
             code: ApiResCode.success,
-            // ipCountInfoList: ruleGetIpCountInfo,
             list: list.map(rule => toJson(rule))
         })
     }
@@ -495,9 +489,6 @@ class AdminApiHandlers {
         const isModified = (feildName) => Reflect.get(req.body, feildName) !== undefined
         const {SERVER_MAX_VALIDATE_THREAD, SERVER_RUNNING} = req.body
         if (isModified('SERVER_MAX_VALIDATE_THREAD') && oldConfigs.SERVER_MAX_VALIDATE_THREAD !== SERVER_MAX_VALIDATE_THREAD) {
-            // EditableConfigs.setConfig('proxyPoolServer', {
-            //     SERVER_MAX_VALIDATE_THREAD: validateThread
-            // })
             if (ValidateTasksManage.isRunning()) {
                 ValidateTasksManage.stop()
                 ValidateTasksManage.start({
@@ -559,6 +550,23 @@ class AdminApiHandlers {
             list: proxyIpList.slice(offset, offset + limit)
         })
     }
+
+    @Decorators.RegisterRoute.get('/getip')
+    @Decorators.ApiCatchError
+    @Decorators.useApiProxy(getProxyUrl)
+    static async getIp (req: express.Request, res: express.Response) {
+        let {pn: pnValue} = req.query
+        const pn = pnValue ? Number(pnValue) : 0
+        const limit = 10, maxPn = 10
+
+        const list = await ChannelIpDataModel.findBySortableFeildOfScoreRange(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, 'rtt', 0, 1000)
+        const randomList = list.length > 20 ? list.filter(_ => Math.random() < 0.3) : list
+        res.json({
+            code: ApiResCode.success,
+            list: randomList
+        })
+    }
+
 
 }
 

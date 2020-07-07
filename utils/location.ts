@@ -42,16 +42,3 @@ export function parseLocation (str: string) {
     }
 }
 
-function test () {
-    let res = getLocationNameByCode('hk')
-    res = getLocationNameByCode('HK')
-    res = getLocationNameByCode('CN')
-    res = parseLocation('香港')
-    res = parseLocation('中国香港')
-    res = parseLocation('中国')
-    res = parseLocation('文莱')
-    res = parseLocation('test')
-    console.log(res)
-}
-
-// test()

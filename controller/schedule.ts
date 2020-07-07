@@ -6,7 +6,6 @@ import { DefaultValueConfigs, configs, EditableConfigs } from 'getSettings'
 import { FreshIpData as WildIpData, CrawlRule } from 'type'
 import {IpDataHttpTypes, IpDataAnonymities} from 'enum_types'
 import * as cache from 'lib/cache'
-import getIpRules from 'config/rules'
 import { baseValidate } from 'lib/validateIp'
 import { crawl } from 'lib/getIp';
 import { IpPoolChannel, ChannelIpDataModel, init as ModelInit, GetIpRule } from 'models/model'
@@ -26,23 +25,6 @@ function getIpDataNextBaseValidateTime (ipDataObj: ChannelIpDataModel, lifeTime:
         intervalTime = lifeTime
     }
     return intervalTime + Date.now()
-}
-
-//@ts-ignore
-global.count1 = 0
-// @ts-ignore
-global.count2 = 0
-// @ts-ignore
-global.count3 = 0
-function test1 (ipData: ChannelIpDataModel) {
-    if (ipData.httpType < 2) {
-        return
-    }
-    if (ipData.anonymity !== 2) {
-        return
-    }
-    //@ts-ignore
-    global.count1 ++
 }
 
 export namespace ValidateTasksManage {
@@ -74,15 +56,12 @@ export namespace ValidateTasksManage {
     }
 
     const vars = {
-        // isInited: false,
         maxThreadCount: 0,
         usedThreadCount: 0,
         status: ValidateTasksManageStatus.stopped,
         getChannel: null as ConfigOptions['getChannelData'],
         startTime: null as number,
-        // leftTheradCount: 0,
     }
-    // let TaskDataQueue: ValidateTaskData[] = []
     const TypedTaskCountMap: Map<string, number> = new Map()
     const TopLevelPriorityTaskQueue: ValidateTaskData[] = []
     const LowLevelPriorityTaskQuque: ValidateTaskData[] = []
@@ -112,7 +91,6 @@ export namespace ValidateTasksManage {
             return TopLevelPriorityTaskQueue.length + LowLevelPriorityTaskQuque.length + MediumPriorityTaskQueue.length
         },
         shiftFromTaskDataQueue() {
-            // const task = TaskDataQueue.shift()
             // TODO 均衡算法
             let task = TopLevelPriorityTaskQueue.shift() || MediumPriorityTaskQueue.shift() || LowLevelPriorityTaskQuque.shift()
             if (task) {
@@ -123,7 +101,6 @@ export namespace ValidateTasksManage {
         },
         pushToTaskDataQueue(taskList: ValidateTaskData[]) {
             taskList.forEach(task => {
-                // TaskDataQueue.push(task)
                 if (task.type === ValidateTypes.baseValidate) {
                     TopLevelPriorityTaskQueue.push(task)
                 } else if (task.type === ValidateTypes.initialValidate) {
@@ -196,11 +173,7 @@ export namespace ValidateTasksManage {
 
             console.log(`start validate [channel]:${task.channelName}/[taskType]:${task.type}/[host]:${task.host}`)
 
-            // const channel = globalVars.channelMap.get(task.channelName)
             const channel = vars.getChannel(task.channelName)
-            // const ipDataModelObj = await ChannelIpDataModel.findChannelIpData(task.channelName, task.host) ||
-            //     new ChannelIpDataModel({ host: task.host, channelName: task.channelName })
-            // initial validate
             let ipDataModelObj: ChannelIpDataModel = null
             if (isInitialValidate(task) || task.type === ValidateTypes.assignToChannelValidate) {
                 ipDataModelObj = new ChannelIpDataModel({ host: task.host, channelName: task.channelName })
@@ -250,8 +223,6 @@ export namespace ValidateTasksManage {
                 }
             }
             if (needExecValidateFunc(task, ValidateTypes.assignToChannelValidate)) {
-                //@ts-ignore
-                global.count3++
                 const validateRes = await this._execBaseValidate(channel.validateUrl, task.host, channel.maxRtt)
                 if (validateRes.error) {
                     return
@@ -275,10 +246,6 @@ export namespace ValidateTasksManage {
                 ipDataModelObj.updateFeild('location', locationObj.code)
             }
 
-            if (isInitialValidate(task)) {
-                test1(ipDataModelObj)
-            }
-
             if (isIpdataModelChanged) {
                 await ipDataModelObj.save()
                 if (isInitialValidate(task)) {
@@ -292,17 +259,12 @@ export namespace ValidateTasksManage {
 
         @catchError('handleValidataTask')
         static async handleValidataTask() {
-            // if (vars.leftTheradCount <= 0) {
-            //     return
-            // }
-            // vars.leftTheradCount--
             const time = UtilFuncs.useThread()
             if (!time) {
                 return
             }
 
             try {
-                // const task = TaskDataQueue.shift()
                 const task = UtilFuncs.shiftFromTaskDataQueue()
                 if (task) {
                     await this.execValidate(task)
@@ -312,11 +274,6 @@ export namespace ValidateTasksManage {
             }
             UtilFuncs.unuseThread(time)
 
-            // vars.leftTheradCount++
-
-            // if (!!TaskDataQueue.length) {
-            //     this.schedule()
-            // }
             if (!!UtilFuncs.getQueueTaskCount()) {
                 this.schedule()
             }
@@ -324,10 +281,6 @@ export namespace ValidateTasksManage {
 
         @catchError()
         static async schedule() {
-            // const nowLeftThreadCount = vars.leftTheradCount
-            // for (let i = 0; i < nowLeftThreadCount; i++) {
-            //     this.handleValidataTask()
-            // }
             const nowLeftThreadCount = vars.maxThreadCount - vars.usedThreadCount
             for (let i = 0; i < nowLeftThreadCount; i++) {
                 this.handleValidataTask()
@@ -336,12 +289,8 @@ export namespace ValidateTasksManage {
     }
 
     export function pushTaskData(channelName: string, taskDataList: ValidateTaskData[]) {
-        // if (vars.isInited) {
-        //     Controller.schedule()
-        // }
         UtilFuncs.pushToTaskDataQueue(taskDataList)
         if (vars.status === ValidateTasksManageStatus.started) {
-            // TaskDataQueue = TaskDataQueue.concat(taskDataList)
             Controller.schedule()
         }
     }
@@ -358,23 +307,7 @@ export namespace ValidateTasksManage {
         return vars.status === ValidateTasksManageStatus.started
     }
 
-    // function updateConfig(config: ConfigOptions) {
-    //     vars.maxThreadCount = config.threadCount
-    //     setImmediate(() => {
-    //         Controller.schedule()
-    //     })
-    // }
-
     export function start(configOptions: ConfigOptions) {
-        // if (vars.isInited) {
-        //     return
-        // }
-        // vars.isInited = true
-        // vars.leftTheradCount = threadCount
-        // setImmediate(() => {
-        //     Controller.schedule()
-        // })
-
         const isStop = vars.status === ValidateTasksManageStatus.stopped
         if (!isStop) {
             throw new Error(`启动失败: ValidateTasksManage 当前状态值为非关闭状态: ${vars.status}`)
@@ -565,23 +498,6 @@ async function start(validateThreadCount?: number) {
     if (validateThreadCount === undefined) {
         validateThreadCount = EditableConfigs.getConfig('proxyPoolServer').SERVER_MAX_VALIDATE_THREAD
     }
-    // const allChannels: IpPoolChannel[] = await IpPoolChannel.findAllChannel()
-    // allChannels.forEach(channel => {
-    //     globalVars.channelMap.set(channel.channelName, channel)
-    // })
-    // cache.setCache(configs.CHANNEL_CACHE_KEY, globalVars.channelMap)
-
-    // ValidateTasksManage.start({
-    //     threadCount: validateThreadCount,
-    //     getChannelData: (name) => {
-    //         const channelMap = cache.getCache<Map<string, IpPoolChannel>>(configs.CHANNEL_CACHE_KEY)
-    //         return channelMap.get(name)
-    //     }
-    // })
-    // allChannels.forEach(channel => {
-    //     ChannelScheduleManage.startChannelSchedule(channel, configs.CHANNEL_SCHEDULE_LOOP_INTERVAL)
-    // })
-
 
     ValidateTasksManage.start({
         threadCount: validateThreadCount,
@@ -609,168 +525,3 @@ export default {
     start,
     stop,
 }
-
-
-async function testValidateTaskManage() {
-    const generateTaskDatas = (arr: number[]) => {
-        return arr.map(i => ({
-            host: i + '',
-            type: null,
-            channelName: '',
-        }))
-    }
-    const taskDatas = generateTaskDatas([1, 2, 3, 4, 5])
-    ValidateTasksManage.pushTaskData('', taskDatas)
-    // ValidateTasksManage.start({ threadCount: 3 })
-    await new Promise((resolve) => {
-        setTimeout(resolve, taskDatas.length * 100)
-    })
-    ValidateTasksManage.pushTaskData('', generateTaskDatas([6, 7, 8]))
-    // ValidateTasksManage.pushTaskData('', taskDatas)
-}
-
-// testValidateTaskManage()
-
-async function testValidateTaskManage2() {
-    const taskDataList = [{
-        host: '60.191.11.251:3128',
-        // channel: confi
-    }]
-    // ValidateTasksManage.pushTaskData('', taskDatas)
-}
-
-// testValidateTaskManage2()
-
-async function insertIpDataModel() {
-    // http://58.220.95.78:9401
-    const o = new ChannelIpDataModel({
-        host: '58.220.95.78',
-        port: 9401,
-    })
-    // o.updateFeild('')
-}
-
-async function testInitialValidate() {
-    await ModelInit()
-    const allChannels: IpPoolChannel[] = await IpPoolChannel.findAllChannel()
-    let wildIpDataList = await crawl({
-        name: 'test',
-        itemSelector: '#list > table > tbody > tr',
-        pagination: {
-            formatUrl: (pn) => `https://www.kuaidaili.com/free/inha/${pn}/`,
-            maxPn: 1,
-        },
-        itemStartIndex: 1,
-        itemInfoSelectors: {
-            ip: 0,
-            port: 1,
-            location: 4,
-            anonymity: (ele) => {
-                if (ele.root().text().includes('高匿')) {
-                    return IpDataAnonymities.high
-                }
-                return IpDataAnonymities.no
-            },
-            rtt: (ele) => {
-                return Number(ele('td:nth-child(6)').text().trim().replace('秒', '')) * 1000
-            },
-            httpType: (ele) => {
-                const text = ele.root().text().toLowerCase()
-                if (text.includes('https')) {
-                    return IpDataHttpTypes.https
-                }
-                if (text.includes('http')) {
-                    return IpDataHttpTypes.http
-                }
-                return null
-            }
-        },
-    })
-    console.log(wildIpDataList.length)
-    // ValidateTasksManage.start({ threadCount: 1 })
-    wildIpDataList = [{
-        ip: '58.220.95.78',
-        port: 9401,
-        httpType: IpDataHttpTypes.https,
-        location: '中国',
-        anonymity: IpDataAnonymities.high,
-        rtt: 302,
-    }]
-    await ValidateTasksManage.pushTaskData(DefaultValueConfigs.DEFAULT_CHANNEL_NAME, wildIpDataList.slice(0, 2).map(obj => {
-        const host = UrlFormat({
-            protocol: 'http',
-            hostname: obj.ip,
-            port: obj.port,
-        })
-        return {
-            type: ValidateTasksManage.ValidateTypes.initialValidate,
-            host,
-            channelName: DefaultValueConfigs.DEFAULT_CHANNEL_NAME,
-            wildIpData: obj
-        }
-    }))
-}
-
-// testInitialValidate()
-
-async function testValiate() {
-    await start(1)
-}
-
-// testValiate()
-
-async function testUrl() {
-    console.log(UrlFormat({
-        hostname: '58.220.95.78',
-        port: 9401,
-        protocol: 'http',
-    }))
-}
-
-// testUrl()
-
-async function testSaveRule() {
-    const allRules = await GetIpRule.getAllRules()
-    await GetIpRule.removeRules(allRules.filter(rule => rule.isInRuleFile).map(rule => rule.name))
-    
-    await Promise.all(getIpRules.map(obj => new GetIpRule({...obj, isInRuleFile: true})).map(o => o.save()))
-    let rules = await GetIpRule.getRulesBySortedUsedCount()
-    console.log(rules)
-}
-
-// testSaveRule()
-
-async function testSaveRule2() {
-    const obj = new GetIpRule(getIpRules[0])
-    console.log(Object.keys(obj.itemInfoSelectors), Object.values(obj.itemInfoSelectors).map(i => typeof i))
-}
-
-// testSaveRule2()
-
-// start(20)
-
-function test() {
-    console.time('1')
-    let set = new Set()
-    let s = 0
-    for (let i = 0; i < 1000000; i++) {
-        // set.add(i)
-        s += i
-    }
-    console.timeEnd('1')
-}
-
-// test()
-
-async function mainTest () {
-    await ModelInit()
-    const channel2 = new IpPoolChannel({
-        channelName: 'zhihu',
-        validateUrl: 'https://www.zhihu.com/explore',
-    })
-    await channel2.save()
-    await testSaveRule()
-    await start(60)
-}
-
-// mainTest()
